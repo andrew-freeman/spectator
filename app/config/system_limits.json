@@ -1,0 +1,11 @@
+{
+  "max_tool_calls_per_cycle": 5,
+  "memory_buffer": {
+    "max_entries": 200
+  },
+  "parameter_bounds": {
+    "actor_temperature": [0.0, 1.0],
+    "critic_temperature": [0.0, 1.0],
+    "governor_merge_threshold": [0.0, 1.0]
+  }
+}
