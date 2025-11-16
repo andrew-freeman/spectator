@@ -16,6 +16,8 @@ except ImportError:  # pragma: no cover - optional dependency
 
 LOGGER = logging.getLogger(__name__)
 
+SYSTEM_INSTRUCTION = "You are operating as an autonomous agent. You must output ONLY JSON. Never speak or explain.\n\n"
+
 
 class LocalLLMClient:
     """Wrapper around ``llama_cpp.Llama`` for local inference."""
@@ -44,6 +46,7 @@ class LocalLLMClient:
         self._llm = Llama(model_path=model_path, n_ctx=n_ctx)
 
     def generate(self, prompt: str, *, stop: Optional[Iterable[str]] = None) -> str:
+        prompt = SYSTEM_INSTRUCTION + prompt
         if self.server_url:
             text = self._generate_remote(prompt, stop=stop)
         else:

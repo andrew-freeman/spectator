@@ -83,6 +83,30 @@ class ToolExecutor:
         status = "ok" if "gpu_temperatures" in result else "error"
         return {"tool": "read_gpu_temps", "status": status, "result": result}
 
+    def _tool_run_system_command(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        result = self._run_system_command(arguments)
+        status = "ok" if "stdout" in result else "error"
+        return {"tool": "run_system_command", "status": status, "result": result}
+
+    def _run_system_command(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        import shlex
+        import subprocess
+
+        cmd = arguments.get("cmd")
+        if not cmd:
+            return {"error": "No command provided"}
+
+        allowed = ["nvidia-smi", "sensors", "uptime"]
+        command_name = shlex.split(cmd)[0] if cmd else ""
+        if command_name not in allowed:
+            return {"error": "Command not allowed"}
+
+        try:
+            output = subprocess.check_output(shlex.split(cmd), stderr=subprocess.STDOUT).decode()
+            return {"stdout": output}
+        except Exception as exc:  # pragma: no cover - defensive system call guard
+            return {"error": str(exc)}
+
 
 LOGGER = logging.getLogger(__name__)
 

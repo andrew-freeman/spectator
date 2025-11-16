@@ -90,6 +90,18 @@ TOOL_SCHEMAS: Dict[str, Dict] = {
             "required": [],
         },
     },
+    "run_system_command": {
+        "name": "run_system_command",
+        "description": "Execute a whitelisted system command like nvidia-smi or sensors.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "cmd": {"type": "string"},
+            },
+            "required": ["cmd"],
+            "additionalProperties": False,
+        },
+    },
 }
 
 
