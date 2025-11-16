@@ -15,10 +15,11 @@ from pydantic import BaseModel, Field
 
 from app.actor.actor_runner import PlannerRunner
 from app.agent.responder import Responder
+from app.core.schemas import GovernorDecision, ReflectionOutput, ToolResult
 from app.critic.critic_runner import CriticRunner
-from app.governor.governor_logic import GovernorDecision, arbitrate
+from app.governor.governor_logic import arbitrate
 from app.memory.episodic_memory import EpisodicMemory
-from app.reflection.reflection_runner import ReflectionOutput, ReflectionRunner
+from app.reflection.reflection_runner import ReflectionRunner
 from app.state.state_store import GLOBAL_STATE_STORE
 
 from .command_interpreter import CommandInterpreter
@@ -173,7 +174,7 @@ class ReasoningSupervisor:
             mode=reflection.mode,
             context=reflection.context,
         )
-        tool_result_objs = []
+        tool_result_objs: List[ToolResult] = []
         if decision.final_tool_calls:
             tool_result_objs = self.tool_executor.execute_many(decision.final_tool_calls)
         tool_results = [

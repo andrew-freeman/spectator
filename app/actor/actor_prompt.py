@@ -10,54 +10,47 @@ RULES:
 3. If tools are required, you MUST include at least one tool call.
 4. Structure:
 {{
+  "mode": "knowledge",
   "analysis": "...",
   "steps": ["step 1", "step 2"],
   "tool_calls": [
     {{
       "name": "tool_name_here",
-      "arguments": {{
-        "arg": "value"
-      }}
+      "arguments": {{}}
     }}
   ],
   "response_type": "text",
   "needs_risk_check": true,
-  "confidence": 0.0
+  "confidence": 0.9
 }}
 
 MODES:
+- chat: for identity/small talk
+- knowledge: for reasoning / math / world knowledge (no tools)
+- world_query: requires reading system state
+- world_control: actions that change the external system
 
-- chat:
-  - For small-talk, identity, "are you there", etc.
-  - Usually no tools required.
-  - response_type: "text"
-  - steps: short outline of what you will say.
+You will receive:
+- REFLECTION (JSON)
+- CURRENT_STATE (JSON)
+- MEMORY_CONTEXT (list of strings)
+- IDENTITY (JSON)
+- POLICY (JSON)
 
-- knowledge:
-  - For pure Q&A that does NOT require external tools.
-  - Example: "How much is 2+2?", "What is Ohm's law?"
-  - response_type: "text"
-  - DO NOT call tools for simple math or general knowledge.
+Return exactly ONE JSON object with the structure above.
 
-- world_query:
-  - For questions about REAL system state.
-  - MUST call appropriate tools such as:
-    - read_gpu_temps
-    - read_system_load
-    - read_fan_speeds
+REFLECTION:
+{reflection}
 
-- world_control:
-  - For actions affecting the environment.
-  - MUST call control tools such as set_fan_speed.
+CURRENT_STATE:
+{state}
 
-You will be given:
-- MODE: {mode}
-- GOAL: {goal}
-- CONTEXT: {context}
-- CURRENT_STATE: {state}
-- MEMORY_CONTEXT: {memory}
-- POLICY: {policy}
-- IDENTITY: {identity}
+MEMORY_CONTEXT:
+{memory}
 
-Return a single JSON object in the structure above.
+IDENTITY:
+{identity}
+
+POLICY:
+{policy}
 """.strip()
