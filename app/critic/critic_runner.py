@@ -54,11 +54,14 @@ class CriticRunner:
         adjusted_steps = [
             str(s).strip() for s in payload.get("adjusted_steps", []) if str(s).strip()
         ]
-        adjusted_tool_calls = [
-            ToolCall(name=tc.get("name", ""), arguments=tc.get("arguments", {}) or {})
-            for tc in payload.get("adjusted_tool_calls", [])
-            if isinstance(tc, dict)
-        ]
+        adjusted_tool_calls = []
+        for tc in payload.get("adjusted_tool_calls", []):
+            if not isinstance(tc, dict):
+                continue
+            tool_name = tc.get("tool_name") or tc.get("name") or ""
+            adjusted_tool_calls.append(
+                ToolCall(tool_name=tool_name, arguments=tc.get("arguments", {}) or {})
+            )
         confidence = float(payload.get("confidence", 0.0) or 0.0)
         notes = str(payload.get("notes", "")).strip()
 
@@ -78,7 +81,7 @@ def _plan_to_payload(plan: Plan) -> Dict[str, Any]:
         "analysis": plan.analysis,
         "steps": plan.steps,
         "tool_calls": [
-            {"name": tc.name, "arguments": tc.arguments}
+            {"tool_name": tc.tool_name, "arguments": tc.arguments}
             for tc in plan.tool_calls
         ],
         "response_type": plan.response_type,

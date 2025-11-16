@@ -74,11 +74,14 @@ class PlannerRunner:
         raw = self._client.generate(prompt, stop=None)
         payload = _parse_json(raw)
 
-        tool_calls = [
-            ToolCall(name=tc.get("name", ""), arguments=tc.get("arguments", {}) or {})
-            for tc in payload.get("tool_calls", [])
-            if isinstance(tc, dict)
-        ]
+        tool_calls = []
+        for tc in payload.get("tool_calls", []):
+            if not isinstance(tc, dict):
+                continue
+            tool_name = tc.get("tool_name") or tc.get("name") or ""
+            tool_calls.append(
+                ToolCall(tool_name=tool_name, arguments=tc.get("arguments", {}) or {})
+            )
 
         steps = [str(s).strip() for s in payload.get("steps", []) if str(s).strip()]
         analysis = str(payload.get("analysis", "")).strip()

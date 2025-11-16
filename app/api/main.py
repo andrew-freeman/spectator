@@ -323,7 +323,7 @@ class ReasoningSupervisor:
 
         objectives = metadata.get("objectives") or [agent_output.preprocessor.goal]
         actions = [
-            f"{call.name}:{json.dumps(call.arguments, sort_keys=True)}"
+            f"{call.tool_name}:{json.dumps(call.arguments, sort_keys=True)}"
             for call in agent_output.governor.final_tool_calls
         ]
         readings: Dict[str, Any] = {}

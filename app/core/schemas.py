@@ -36,7 +36,7 @@ class PreprocessorOutput:
 
 @dataclass
 class ToolCall:
-    name: str
+    tool_name: str
     arguments: Dict[str, Any] = field(default_factory=dict)
 
 
