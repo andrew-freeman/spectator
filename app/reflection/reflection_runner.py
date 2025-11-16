@@ -21,9 +21,13 @@ You are a careful reflection module that analyses a user message before any tool
 For the provided USER MESSAGE, respond strictly as a JSON object with the following keys:
 - intent: one of ["query", "command", "objective", "ambiguous"].
 - refined_objectives: array of concise objective strings (may be empty).
-- context: JSON object of contextual hints or structured slots (may be empty).
+- context: JSON object of contextual hints or structured slots (may be empty). Use "chat_mode": true when the user is
+  purely conversing.
 - needs_clarification: boolean.
 - reflection_notes: short natural-language explanation.
+
+IDENTITY PROFILE:
+{identity_block}
 
 Example:
 {{
@@ -97,6 +101,7 @@ class ReflectionRunner:
 
         prompt = REFLECTION_PROMPT.format(
             message=message,
+            identity_block=json.dumps(self._identity_profile, indent=2),
         )
         fallback = ReflectionOutput(
             intent="ambiguous",
@@ -138,6 +143,8 @@ class ReflectionRunner:
         text = (message or "").strip()
         if not text:
             return False
+        if self._is_identity_question(text):
+            return False
         return self._is_simple_math(text) or self._is_simple_natural_question(text)
 
     def _is_simple_math(self, text: str) -> bool:
@@ -156,6 +163,10 @@ class ReflectionRunner:
             or lowered.startswith(f"{word}'s")
             for word in question_words
         )
+
+    def _is_identity_question(self, text: str) -> bool:
+        lowered = text.lower()
+        return "who are you" in lowered or lowered.strip() in {"who r u", "who ru"}
 
 
 __all__ = ["ReflectionRunner", "ReflectionOutput"]

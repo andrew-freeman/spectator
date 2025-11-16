@@ -9,13 +9,12 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Protocol
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import RedirectResponse
-from markupsafe import Markup
 from pydantic import BaseModel, Field
 
-from app.actor.actor_runner import ActorRunner, ActorOutput
+from app.actor.actor_runner import ActorRunner
 from app.critic.critic_runner import CriticRunner
 from app.governor.governor_logic import arbitrate
 from app.meta.meta_actor_runner import MetaActorRunner, MetaActorOutput
@@ -23,6 +22,7 @@ from app.meta.meta_critic_runner import MetaCriticRunner, MetaCriticOutput
 from app.meta.meta_governor_logic import evaluate_meta_cycle
 from app.memory.episodic_memory import EpisodicMemory
 from app.reflection.reflection_runner import ReflectionRunner
+from app.response.response_builder import build_response
 from app.state.state_store import GLOBAL_STATE_STORE
 
 from .command_interpreter import CommandInterpreter
@@ -287,6 +287,7 @@ app.state.identity_profile = load_json_config(
         "name": "Spectator",
         "role": "Local autonomous reasoning agent",
         "environment": "User's workstation",
+        "description": "Spectator is a local assistant focused on safe system monitoring and control.",
         "capabilities": [],
         "limitations": [],
     },
@@ -314,39 +315,6 @@ app.state.system_limits = load_json_config(SYSTEM_LIMITS_PATH, {})
 
 templates = Jinja2Templates(directory="app/ui/templates")
 app.mount("/static", StaticFiles(directory="app/ui/static"), name="static")
-
-
-def format_agent_reply(actor_output: ActorOutput, tool_results: List[Dict[str, Any]]) -> str:
-    """Render a human-friendly agent reply while keeping the core agent JSON intact."""
-    reply = {
-        "analysis": actor_output.analysis,
-        "plan": actor_output.plan,
-        "tool_calls": [
-            {"tool": tc.tool_name, "arguments": tc.arguments}
-            for tc in actor_output.tool_calls
-        ],
-        "tool_results": tool_results,
-        "confidence": actor_output.confidence,
-    }
-    return json.dumps(reply, indent=2)
-
-
-def natural_chat_response(user_msg: str) -> str:
-    profile: Dict[str, Any] = getattr(app.state, "identity_profile", {})
-    name = profile.get("name", "Spectator")
-    role = profile.get("role", "an autonomous agent")
-    environment = profile.get("environment", "this workstation")
-    capabilities = profile.get("capabilities", [])
-    capability_hint = ""
-    if capabilities:
-        capability_hint = " I can " + ", ".join(capabilities[:2])
-        if len(capabilities) > 2:
-            capability_hint += ", and more"
-        capability_hint += "."
-    return (
-        f"I am {name}, {role} operating within {environment}."
-        f"{capability_hint} You said: '{user_msg}'."
-    )
 
 
 def configure_supervisor(
@@ -539,57 +507,30 @@ async def chat_api(
     reflection = reflection_runner.run(message)
 
     intent = (reflection or {}).get("intent", "ambiguous")
+    context = dict((reflection or {}).get("context", {}))
+    objectives = reflection.get("refined_objectives") or [message]
 
-    if intent == "chat":
-        return templates.TemplateResponse(
-            "chat_message_agent.html",
-            {"request": request, "message": natural_chat_response(message)},
-        )
-
-    if intent == "query":
-        ctx = dict(reflection.get("context", {}))
-        objectives = reflection.get("refined_objectives") or [message]
-        cycle = supervisor.run_cycle(
-            objectives=objectives,
-            context=ctx,
-            memory_snippets=[],
-        )
-        actor_output = ActorOutput.from_json(cycle.get("actor", {}))
-        tool_results = cycle.get("tool_results", [])
-        formatted_reply = format_agent_reply(actor_output, tool_results)
-        return templates.TemplateResponse(
-            "chat_message_agent.html",
-            {
-                "request": request,
-                "message": Markup(f"<pre>{formatted_reply}</pre>"),
-            },
-        )
-
-    if intent == "command":
-        objectives = reflection.get("refined_objectives") or [message]
-        supervisor.run_cycle(
-            objectives=objectives,
-            context=reflection.get("context", {}),
-            memory_snippets=[],
-        )
-        return templates.TemplateResponse(
-            "chat_message_agent.html",
-            {"request": request, "message": "Action completed."},
-        )
-
+    cycle_result: Optional[Dict[str, Any]] = None
     if intent == "objective":
-        objectives = reflection.get("refined_objectives", []) or [message]
         for item in objectives:
             app.state.memory_manager.append(item, {"kind": "user_objective"})
-        return templates.TemplateResponse(
-            "chat_message_agent.html",
-            {"request": request, "message": "Objective registered."},
+    else:
+        cycle_result = supervisor.run_cycle(
+            objectives=objectives,
+            context=context,
+            memory_snippets=[],
         )
 
-    return templates.TemplateResponse(
-        "chat_message_agent.html",
-        {"request": request, "message": natural_chat_response(message)},
+    final_message = build_response(
+        user_message=message,
+        reflection_output=reflection,
+        actor_output=(cycle_result or {}).get("actor", {}),
+        critic_output=(cycle_result or {}).get("critic", {}),
+        governor_decision=(cycle_result or {}).get("governor", {}),
+        tool_results=(cycle_result or {}).get("tool_results", []),
+        identity_profile=app.state.identity_profile,
     )
+    return final_message
 
 def _is_sensitive_key(key: str) -> bool:
     lowered = key.lower()
