@@ -33,5 +33,10 @@ class StateManager:
     def history(self) -> List[Dict[str, Any]]:
         return deepcopy(self._history)
 
+    def update_last_cycle(self, delta: Dict[str, Any]) -> None:
+        if not self._history:
+            return
+        self._history[-1].update(delta)
+
 
 __all__ = ["StateManager"]
