@@ -38,7 +38,8 @@
     </button>
   </div>
   <div id="cycle-history" class="space-y-4">
-    {% for result in history %}
+    {% for entry in history %}
+      {% set result = entry %}
       {% include "cycle_row.html" %}
     {% endfor %}
   </div>
