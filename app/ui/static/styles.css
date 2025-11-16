@@ -1,0 +1,7 @@
+body {
+  font-feature-settings: "cv11";
+}
+
+pre {
+  white-space: pre-wrap;
+}

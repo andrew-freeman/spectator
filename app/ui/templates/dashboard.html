@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Spectator Cognitive Dashboard{% endblock %}
+{% block content %}
+<div class="flex flex-col gap-6">
+  <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div>
+      <h2 class="text-3xl font-semibold">Spectator Cognitive Dashboard</h2>
+      <p class="text-slate-500">Monitor reasoning cycles and cognitive state in real-time.</p>
+    </div>
+    <button
+      hx-post="/hx/run-cycle"
+      hx-target="#cycle-history"
+      hx-swap="beforebegin"
+      hx-encoding="json"
+      hx-vals='{"objectives":["Autonomous reasoning cycle"],"context":{},"memory":[]}'
+      class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-lg shadow">
+      Run Cycle
+    </button>
+  </div>
+
+  <section class="bg-white rounded-xl shadow border border-slate-200 p-6">
+    <h3 class="text-xl font-semibold mb-2">Current State</h3>
+    <p class="text-sm text-slate-500 mb-4">Real-time snapshot after the latest cycle.</p>
+    <pre class="bg-slate-900 text-green-200 text-sm rounded-lg p-4 overflow-x-auto">
+{{ state | tojson(indent=2) }}
+    </pre>
+  </section>
+
+  <section>
+    <h3 class="text-xl font-semibold">Cycle History</h3>
+    <p class="text-sm text-slate-500">Detailed log of each reasoning cycle, including critiques and tool usage.</p>
+    <div id="cycle-history" class="space-y-4 mt-4">
+      {% for entry in history %}
+        {% include "cycle_row.html" with result=entry %}
+      {% endfor %}
+    </div>
+  </section>
+</div>
+{% endblock %}

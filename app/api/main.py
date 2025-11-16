@@ -8,7 +8,9 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Protocol
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from app.actor.actor_runner import ActorRunner
@@ -187,6 +189,9 @@ app.state.tool_executor = ToolExecutor(app.state.state_manager, app.state.memory
 app.state.cog_params = load_json_config(COG_PARAMS_PATH, {"meta_frequency": 3})
 app.state.system_limits = load_json_config(SYSTEM_LIMITS_PATH, {})
 
+templates = Jinja2Templates(directory="app/ui/templates")
+app.mount("/static", StaticFiles(directory="app/ui/static"), name="static")
+
 
 def configure_supervisor(
     *,
@@ -227,10 +232,34 @@ def healthcheck() -> Dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/")
+def dashboard(request: Request, supervisor: ReasoningSupervisor = Depends(get_supervisor)):
+    state = supervisor.state_manager.read()
+    history = supervisor.state_manager.history()
+    return templates.TemplateResponse(
+        "dashboard.html",
+        {"request": request, "state": state, "history": history},
+    )
+
+
 @app.post("/run-cycle", response_model=CycleResponse)
 def run_cycle(request: CycleRequest, supervisor: ReasoningSupervisor = Depends(get_supervisor)) -> CycleResponse:
     result = supervisor.run_cycle(request.objectives, context=request.context, memory_snippets=request.memory)
     return CycleResponse(**result)
+
+
+@app.post("/hx/run-cycle")
+def hx_run_cycle(
+    cycle_request: CycleRequest,
+    request: Request,
+    supervisor: ReasoningSupervisor = Depends(get_supervisor),
+):
+    result = supervisor.run_cycle(
+        cycle_request.objectives,
+        context=cycle_request.context,
+        memory_snippets=cycle_request.memory,
+    )
+    return templates.TemplateResponse("cycle_row.html", {"request": request, "result": result})
 
 
 @app.get("/history")
