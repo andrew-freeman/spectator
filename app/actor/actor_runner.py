@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Protocol
 
-from .actor_prompt import build_actor_prompt
+from .actor_prompt import ACTOR_PROMPT
 
 
 class SupportsGenerate(Protocol):
@@ -61,10 +61,14 @@ class ActorRunner:
         context: Optional[Dict[str, Any]] = None,
         memory_snippets: Optional[List[str]] = None,
     ) -> ActorOutput:
-        prompt = build_actor_prompt(objectives=objectives, context=context, memory_snippets=memory_snippets)
+        prompt = ACTOR_PROMPT
         raw = self._client.generate(prompt, stop=None)
         payload = _parse_json(raw)
-        return ActorOutput.from_json(payload)
+        output = ActorOutput.from_json(payload)
+        ctx = context or {}
+        if ctx.get("force_action") and not output.tool_calls:
+            raise ValueError("Actor must produce a tool call in force_action mode.")
+        return output
 
 
 def _parse_json(raw: str) -> Dict[str, Any]:

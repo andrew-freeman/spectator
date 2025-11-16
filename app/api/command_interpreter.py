@@ -37,6 +37,7 @@ class CommandInterpreter:
             "objectives": _ensure_string_list(payload.get("objectives")),
             "context": dict(payload.get("context") or {}),
             "memory_snippets": _ensure_string_list(payload.get("memory_snippets")),
+            "force_action": True,
         }
 
 

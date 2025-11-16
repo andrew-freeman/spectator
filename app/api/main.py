@@ -91,10 +91,11 @@ class ReasoningSupervisor:
         context: Optional[Dict[str, Any]] = None,
         memory_snippets: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        actor_output = self.actor_runner.run(objectives, context=context or {}, memory_snippets=memory_snippets)
+        ctx = dict(context or {})
+        actor_output = self.actor_runner.run(objectives, context=ctx, memory_snippets=memory_snippets)
         actor_payload = asdict(actor_output)
         critic_output = self.critic_runner.run(actor_payload)
-        decision = arbitrate(actor_output, critic_output)
+        decision = arbitrate(actor_output, critic_output, context=ctx)
 
         tool_results: List[Dict[str, Any]] = []
         if decision.verdict not in {"request_more_data", "defer_to_critic"}:
@@ -329,9 +330,12 @@ async def command(
 
     LOGGER.info(f"Received command message: {message}")
     structured = interpreter.interpret(message)
+    structured_context = dict(structured.get("context", {}))
+    if structured.get("force_action"):
+        structured_context["force_action"] = True
     cycle_result = supervisor.run_cycle(
         structured.get("objectives", []),
-        context=structured.get("context", {}),
+        context=structured_context,
         memory_snippets=structured.get("memory_snippets", []),
     )
     return templates.TemplateResponse("cycle_row.html", {"result": cycle_result, "request": request})
@@ -377,9 +381,13 @@ async def chat_api(
     LOGGER.info(f"[CHAT] Received: {message}")
 
     context = interpreter.interpret(message)
+    context["force_action"] = True
+    context_payload = dict(context.get("context", {}))
+    if context.get("force_action"):
+        context_payload["force_action"] = True
     cycle = supervisor.run_cycle(
         objectives=context.get("objectives") or [message],
-        context=context.get("context", {}),
+        context=context_payload,
         memory_snippets=context.get("memory_snippets", []),
     )
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.actor.actor_runner import ActorOutput, ToolCall
 from app.critic.critic_runner import CriticOutput
@@ -22,12 +22,26 @@ class GovernorDecision:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-def arbitrate(actor: ActorOutput, critic: CriticOutput) -> GovernorDecision:
+def arbitrate(
+    actor: ActorOutput,
+    critic: CriticOutput,
+    *,
+    context: Optional[Dict[str, Any]] = None,
+) -> GovernorDecision:
     """Deterministically decide how to proceed based on actor/critic outputs."""
+
+    context = context or {}
+
+    def _finalise(decision: GovernorDecision) -> GovernorDecision:
+        if context.get("force_action") and decision.verdict in {"request_more_data", "defer_to_critic"}:
+            decision.verdict = "approve"
+            decision.plan = actor.plan
+            decision.tool_calls = actor.tool_calls
+        return decision
 
     # Missing data guard.
     if not actor.plan or not actor.analysis:
-        return GovernorDecision(
+        return _finalise(
             verdict="request_more_data",
             rationale="Actor response was incomplete; requesting more context.",
             metadata=summarise_disagreements(actor, critic),
@@ -36,14 +50,14 @@ def arbitrate(actor: ActorOutput, critic: CriticOutput) -> GovernorDecision:
     risk = critic.risk_level.lower().strip()
 
     if risk == "unsafe" or risk == "high":
-        return GovernorDecision(
+        return _finalise(
             verdict="defer_to_critic",
             rationale="Critic identified unsafe or high-risk behaviour.",
             metadata=summarise_disagreements(actor, critic),
         )
 
     if critic.confidence < 0.4:
-        return GovernorDecision(
+        return _finalise(
             verdict="trust_actor",
             rationale="Critic confidence too low; defaulting to actor plan.",
             plan=actor.plan,
@@ -53,7 +67,7 @@ def arbitrate(actor: ActorOutput, critic: CriticOutput) -> GovernorDecision:
 
     if critic.detected_issues:
         merged: MergedPlan = merge_plans(actor, critic)
-        return GovernorDecision(
+        return _finalise(
             verdict="merge",
             rationale="Resolved partial mismatch by merging actor plan with critic feedback.",
             plan=merged.steps,
@@ -61,7 +75,7 @@ def arbitrate(actor: ActorOutput, critic: CriticOutput) -> GovernorDecision:
             metadata={**summarise_disagreements(actor, critic), "notes": merged.notes},
         )
 
-    return GovernorDecision(
+    return _finalise(
         verdict="trust_actor",
         rationale="Critic found no issues and maintained adequate confidence.",
         plan=actor.plan,

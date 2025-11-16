@@ -14,6 +14,8 @@ import httpx
 
 LOGGER = logging.getLogger(__name__)
 
+SYSTEM_INSTRUCTION = "You are operating as an autonomous agent. You must output ONLY JSON. Never speak or explain.\n\n"
+
 
 class OpenAIClientError(RuntimeError):
     """Custom error raised when the OpenAI-compatible endpoint fails."""
@@ -61,10 +63,11 @@ class OpenAIClient:
         self._client = httpx.Client(base_url=self.base_url, timeout=timeout, headers={"Authorization": f"Bearer {self.api_key}"})
 
     def generate(self, prompt: str, *, stop: Optional[Iterable[str]] = None) -> str:
+        prompt = SYSTEM_INSTRUCTION + prompt
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": "You are a JSON-only reasoning engine."},
+                {"role": "system", "content": SYSTEM_INSTRUCTION.strip()},
                 {"role": "user", "content": prompt},
             ],
             "temperature": self.temperature,
