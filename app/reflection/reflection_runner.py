@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, Iterable, List, Optional, Protocol
 
@@ -94,6 +95,16 @@ class ReflectionRunner:
         self._identity_profile = identity_profile or {}
 
     def run(self, message: str) -> Dict[str, Any]:
+        if self._is_simple_query(message):
+            output = ReflectionOutput(
+                intent="query",
+                refined_objectives=[],
+                context={"query_mode": True, "allowed_tool_kinds": ["sensor"]},
+                needs_clarification=False,
+                reflection_notes="Simple query detected; bypassing reflection model.",
+            )
+            return output.to_dict()
+
         prompt = REFLECTION_PROMPT.format(
             message=message,
             identity_block=json.dumps(self._identity_profile, indent=2),
@@ -133,6 +144,29 @@ class ReflectionRunner:
             ctx["force_action"] = True
         elif output.intent == "objective":
             ctx["goal_update"] = True
+
+    def _is_simple_query(self, message: str) -> bool:
+        text = (message or "").strip()
+        if not text:
+            return False
+        return self._is_simple_math(text) or self._is_simple_natural_question(text)
+
+    def _is_simple_math(self, text: str) -> bool:
+        return bool(re.fullmatch(r"[0-9\s+\-*/^().=]+", text))
+
+    def _is_simple_natural_question(self, text: str) -> bool:
+        lowered = text.lower()
+        if len(lowered) > 60:
+            return False
+        if len(lowered.split()) > 12:
+            return False
+        question_words = ("who", "what", "where", "when", "why", "how")
+        return any(
+            lowered.startswith(word)
+            or lowered.startswith(f"{word} ")
+            or lowered.startswith(f"{word}'s")
+            for word in question_words
+        )
 
 
 __all__ = ["ReflectionRunner", "ReflectionOutput"]

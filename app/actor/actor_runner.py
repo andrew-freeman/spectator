@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Protocol
 
@@ -109,7 +110,9 @@ class ActorRunner:
         payload = _parse_json(raw)
         output = ActorOutput.from_json(payload)
         if ctx.get("force_action") and not output.tool_calls:
-            raise ValueError("Actor must produce a tool call in force_action mode.")
+            logging.getLogger(__name__).warning(
+                "force_action requested but actor produced no tool calls; falling back to reasoning."
+            )
         return output
 
 
