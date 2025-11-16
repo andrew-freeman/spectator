@@ -84,7 +84,7 @@ class ActorRunner:
     ) -> ActorOutput:
         ctx = context or {}
         objectives_block = json.dumps(objectives, indent=2)
-        context_block = json.dumps(context or {}, indent=2)
+        context_block = json.dumps(ctx, indent=2)
         memory_block = json.dumps(memory_snippets or [], indent=2)
         identity_block = json.dumps(self._identity, indent=2)
         policy_block = json.dumps(self._policy, indent=2)
@@ -96,16 +96,6 @@ class ActorRunner:
             policy=policy_block,
         )
         raw = self._client.generate(prompt, stop=None)
-
-        # CHAT MODE short-circuit
-        if ctx.get("chat_mode"):
-            return ActorOutput(
-                analysis="Chat mode active — responding without tool usage.",
-                plan=[],
-                tool_calls=[],
-                information_gaps=[],
-                confidence=1.0
-            )
 
         payload = _parse_json(raw)
         output = ActorOutput.from_json(payload)
