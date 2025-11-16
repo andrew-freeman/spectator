@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="p-6 space-y-4">
+  <h1 class="text-xl font-semibold mb-3">System History</h1>
+
+  <div id="history-list"
+       hx-get="/ui/history/list"
+       hx-trigger="load"
+       hx-swap="innerHTML">
+       Loading...
+  </div>
+</section>
+{% endblock %}

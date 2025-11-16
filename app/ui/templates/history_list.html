@@ -1,0 +1,8 @@
+{% for record in history %}
+<details class="mb-4 bg-white p-4 rounded shadow">
+  <summary class="cursor-pointer font-semibold">
+    {{ record.timestamp }} — Cycle {{ record.cycle }}
+  </summary>
+  <pre class="mt-2 text-sm overflow-x-auto">{{ record | tojson(indent=2) }}</pre>
+</details>
+{% endfor %}
