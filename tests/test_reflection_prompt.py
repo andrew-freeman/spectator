@@ -17,22 +17,21 @@ class _DummyClient:
         return json.dumps(self._payload)
 
 
-def test_reflection_prompt_handles_literal_braces():
-    prompt = REFLECTION_PROMPT.format(message="test", identity_block="{}")
-    assert '"intent"' in prompt
-    assert '"chat_mode"' in prompt
+def test_reflection_prompt_keeps_json_example():
+    prompt = REFLECTION_PROMPT.format(message="test")
+    assert '"mode"' in prompt and '"goal"' in prompt
 
 
-def test_reflection_runner_injects_identity_and_chat_mode():
+def test_reflection_runner_parses_json_payload():
     payload = {
-        "intent": "chat",
-        "refined_objectives": [],
+        "mode": "knowledge",
+        "goal": "Compute 2+2",
         "context": {},
         "needs_clarification": False,
-        "reflection_notes": "",
+        "reflection_notes": "Simple math",
     }
     client = _DummyClient(payload)
     runner = ReflectionRunner(client, identity_profile={"name": "Spectator"})
-    result = runner.run("Who are you?")
-    assert result["context"].get("chat_mode") is True
-    assert "Spectator" in client.last_prompt
+    result = runner.run("How much is 2+2?")
+    assert result.mode == "knowledge"
+    assert result.goal == "Compute 2+2"
