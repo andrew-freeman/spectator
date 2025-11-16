@@ -1,0 +1,46 @@
+{% extends "layout.html" %}
+{% block title %}Spectator Cycles{% endblock %}
+{% block content %}
+<section class="bg-white rounded-xl shadow border border-slate-200 p-6 space-y-1">
+  <h2 class="text-3xl font-semibold">Reasoning Cycles</h2>
+  <p class="text-slate-500 text-sm">
+    Review live state and previously executed cycles. Prefer the Chat tab to launch new objectives, and
+    use this page for manual debugging or one-off monitoring.
+  </p>
+</section>
+
+<section class="grid md:grid-cols-2 gap-6">
+  <div class="bg-white rounded-xl shadow border border-slate-200 p-6">
+    <h3 class="text-xl font-semibold mb-2">Current State</h3>
+    <p class="text-sm text-slate-500 mb-4">Snapshot after the latest cycle.</p>
+    <pre class="bg-slate-900 text-green-200 text-sm rounded-lg p-4 overflow-x-auto">{{ state | tojson(indent=2) }}</pre>
+  </div>
+  <div class="bg-white rounded-xl shadow border border-slate-200 p-6">
+    <h3 class="text-xl font-semibold mb-2">GPU Temperatures</h3>
+    <pre class="bg-slate-900 text-green-200 text-sm rounded-lg p-4 overflow-x-auto">{{ gpu_temps | tojson(indent=2) }}</pre>
+  </div>
+</section>
+
+<section class="bg-white rounded-xl shadow border border-slate-200 p-6">
+  <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+    <div>
+      <h3 class="text-xl font-semibold">Cycle History</h3>
+      <p class="text-sm text-slate-500">Full log of each autonomous reasoning pass.</p>
+    </div>
+    <button
+      hx-post="/hx/run-cycle"
+      hx-target="#cycle-history"
+      hx-swap="beforebegin"
+      hx-encoding="json"
+      hx-vals='{"objectives":["Manual debugging cycle"],"context":{},"memory":[]}'
+      class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-lg shadow">
+      Run Manual Cycle
+    </button>
+  </div>
+  <div id="cycle-history" class="space-y-4">
+    {% for result in history %}
+      {% include "cycle_row.html" %}
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

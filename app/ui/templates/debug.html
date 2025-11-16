@@ -1,0 +1,52 @@
+{% extends "layout.html" %}
+{% block title %}Spectator Debug{% endblock %}
+{% block content %}
+<section class="bg-white rounded-xl shadow border border-slate-200 p-6">
+  <h2 class="text-3xl font-semibold mb-2">System Debug Snapshot</h2>
+  <p class="text-slate-500 text-sm">
+    Inspect sanitized actor, critic, governor, meta, and configuration payloads from the latest cycle.
+    Use this view when you need to trace low-level behavior beyond the conversational chat feed.
+  </p>
+</section>
+
+<section class="grid md:grid-cols-2 gap-6">
+  <div class="bg-white rounded-xl shadow border border-slate-200 p-6">
+    <h3 class="text-xl font-semibold">Cycle #{{ snapshot.cycle }}</h3>
+    <p class="text-sm text-slate-500">Cycle number is zero-indexed.</p>
+  </div>
+  <div class="bg-white rounded-xl shadow border border-slate-200 p-6">
+    <h3 class="text-xl font-semibold">Meta Summary Available?</h3>
+    <p class="text-sm text-slate-500">{{ 'Yes' if snapshot.meta else 'No meta insights recorded yet.' }}</p>
+  </div>
+</section>
+
+<section class="grid md:grid-cols-2 gap-6">
+  <div class="bg-white rounded-xl shadow border border-slate-200 p-6">
+    <h3 class="text-lg font-semibold mb-2">Actor Snapshot</h3>
+    <pre class="bg-slate-900 text-green-200 text-sm rounded-lg p-4 overflow-x-auto">{{ snapshot.actor | tojson(indent=2) }}</pre>
+  </div>
+  <div class="bg-white rounded-xl shadow border border-slate-200 p-6">
+    <h3 class="text-lg font-semibold mb-2">Critic Snapshot</h3>
+    <pre class="bg-slate-900 text-green-200 text-sm rounded-lg p-4 overflow-x-auto">{{ snapshot.critic | tojson(indent=2) }}</pre>
+  </div>
+  <div class="bg-white rounded-xl shadow border border-slate-200 p-6">
+    <h3 class="text-lg font-semibold mb-2">Governor Snapshot</h3>
+    <pre class="bg-slate-900 text-green-200 text-sm rounded-lg p-4 overflow-x-auto">{{ snapshot.governor | tojson(indent=2) }}</pre>
+  </div>
+  <div class="bg-white rounded-xl shadow border border-slate-200 p-6">
+    <h3 class="text-lg font-semibold mb-2">Meta Snapshot</h3>
+    <pre class="bg-slate-900 text-green-200 text-sm rounded-lg p-4 overflow-x-auto">{{ snapshot.meta | tojson(indent=2) }}</pre>
+  </div>
+</section>
+
+<section class="grid md:grid-cols-2 gap-6">
+  <div class="bg-white rounded-xl shadow border border-slate-200 p-6">
+    <h3 class="text-lg font-semibold mb-2">State Snapshot</h3>
+    <pre class="bg-slate-900 text-green-200 text-sm rounded-lg p-4 overflow-x-auto">{{ snapshot.state | tojson(indent=2) }}</pre>
+  </div>
+  <div class="bg-white rounded-xl shadow border border-slate-200 p-6">
+    <h3 class="text-lg font-semibold mb-2">Cognitive Parameters</h3>
+    <pre class="bg-slate-900 text-green-200 text-sm rounded-lg p-4 overflow-x-auto">{{ snapshot.cog_params | tojson(indent=2) }}</pre>
+  </div>
+</section>
+{% endblock %}
