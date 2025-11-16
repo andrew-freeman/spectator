@@ -15,7 +15,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ToolExecutor:
-    """Execute tool calls produced by the planner/governor."""
+    """Execute tool calls produced by the planner/governor for Spectator v2."""
 
     def __init__(
         self,
@@ -30,25 +30,40 @@ class ToolExecutor:
         self._policy_config = policy_config or {}
         self._system_limits = system_limits or {}
         self._recent_sensors: Dict[str, Dict[str, Any]] = {}
-        bounds = (self._system_limits.get("fan_speed_bounds") or {}) if isinstance(self._system_limits, dict) else {}
+
+        bounds = (self._system_limits.get("fan_speed_bounds") or {})
         self._fan_min = float(bounds.get("min", 0.0))
         self._fan_max = float(bounds.get("max", 85.0))
 
-    # Public API ---------------------------------------------------------
+    # ------------------------------------------------------------------
+    # EXECUTION DISPATCH
+    # ------------------------------------------------------------------
     def execute(self, call: ToolCall) -> ToolResult:
         handler = getattr(self, f"_tool_{call.name}", None)
         if handler is None:
-            return ToolResult(tool=call.name, status="error", result={}, error=f"Unknown tool: {call.name}")
+            return ToolResult(
+                tool=call.name,
+                status="error",
+                result={},
+                error=f"Unknown tool: {call.name}",
+            )
         try:
             return handler(**call.arguments)
-        except Exception as exc:  # pragma: no cover - defensive guard
+        except Exception as exc:
             LOGGER.exception("Tool %s failed", call.name)
-            return ToolResult(tool=call.name, status="error", result={}, error=str(exc))
+            return ToolResult(
+                tool=call.name,
+                status="error",
+                result={},
+                error=str(exc),
+            )
 
     def execute_many(self, calls: Sequence[ToolCall]) -> List[ToolResult]:
         return [self.execute(call) for call in calls]
 
-    # Tool handlers ------------------------------------------------------
+    # ------------------------------------------------------------------
+    # READ TOOLS
+    # ------------------------------------------------------------------
     def _tool_read_gpu_temps(self, **_: Any) -> ToolResult:
         try:
             output = subprocess.check_output(
@@ -57,17 +72,74 @@ class ToolExecutor:
             )
             temps = [int(line.strip()) for line in output.splitlines() if line.strip()]
             self._record_sensor("gpu_temps", temps)
-            return ToolResult(tool="read_gpu_temps", status="ok", result={"gpu_temps": temps})
-        except Exception as exc:  # pragma: no cover - system dependency
-            return ToolResult(tool="read_gpu_temps", status="error", result={}, error=str(exc))
+            return ToolResult(
+                tool="read_gpu_temps",
+                status="ok",
+                result={"gpu_temps": temps},
+            )
+        except Exception as exc:
+            return ToolResult(
+                tool="read_gpu_temps",
+                status="error",
+                result={},
+                error=str(exc),
+            )
 
-    def _tool_set_fan_speed(self, *, fan_id: str = "gpu", speed: float, reason: str, **_: Any) -> ToolResult:
-        if not reason:
-            return ToolResult(tool="set_fan_speed", status="error", result={}, error="A justification reason is required.")
+    def _tool_read_state(self, **_: Any) -> ToolResult:
+        return ToolResult(
+            tool="read_state",
+            status="ok",
+            result=self._state_manager.read(),
+        )
+
+    def _tool_read_sensors(self, **_: Any) -> ToolResult:
+        sensors = self._state_manager.read().get("sensors") or {}
+        return ToolResult(
+            tool="read_sensors",
+            status="ok",
+            result=sensors,
+        )
+
+    # ------------------------------------------------------------------
+    # CONTROL TOOLS
+    # ------------------------------------------------------------------
+    def _tool_set_fan_speed(
+        self,
+        *,
+        fan_id: str = "gpu",
+        speed: float | None = None,
+        fan_speed: float | None = None,
+        reason: str = "",
+        **_: Any,
+    ) -> ToolResult:
+        """Set fan speed with optional safety logic."""
+
+        # Accept LLM variations: speed OR fan_speed
+        final_speed = speed if speed is not None else fan_speed
+
+        if final_speed is None:
+            return ToolResult(
+                tool="set_fan_speed",
+                status="error",
+                result={},
+                error="Missing fan speed.",
+            )
+
+        # reason optional but encouraged
+        if not isinstance(reason, str):
+            reason = str(reason)
+
         try:
-            speed_value = float(speed)
+            speed_value = float(final_speed)
         except (TypeError, ValueError):
-            return ToolResult(tool="set_fan_speed", status="error", result={}, error="Invalid fan speed value.")
+            return ToolResult(
+                tool="set_fan_speed",
+                status="error",
+                result={},
+                error="Invalid fan speed value.",
+            )
+
+        # Enforce bounds
         if speed_value < self._fan_min or speed_value > self._fan_max:
             return ToolResult(
                 tool="set_fan_speed",
@@ -75,8 +147,11 @@ class ToolExecutor:
                 result={},
                 error=f"Fan speed must be between {self._fan_min} and {self._fan_max}.",
             )
+
+        # Thermal policy guard
         thermal_policy = self._policy_config.get("thermal_policy", {})
         target_max = thermal_policy.get("target_max")
+
         if target_max is not None:
             recent = self._recent_sensors.get("gpu_temps")
             if recent and isinstance(recent.get("value"), list):
@@ -85,8 +160,9 @@ class ToolExecutor:
                         tool="set_fan_speed",
                         status="error",
                         result={},
-                        error="Temperatures already below target; control action unnecessary.",
+                        error="Temperatures already below target; control unnecessary.",
                     )
+
         updated = self._state_manager.update(
             {
                 "fan_speed": speed_value,
@@ -95,6 +171,7 @@ class ToolExecutor:
                 "fan_timestamp": time.time(),
             }
         )
+
         return ToolResult(
             tool="set_fan_speed",
             status="ok",
@@ -105,20 +182,22 @@ class ToolExecutor:
             },
         )
 
-    def _tool_read_state(self, **_: Any) -> ToolResult:
-        return ToolResult(tool="read_state", status="ok", result=self._state_manager.read())
+    def _tool_noop_control(self, reason: str = "", **_: Any) -> ToolResult:
+        """Fallback safe control for planner defaults."""
+        return ToolResult(
+            tool="noop_control",
+            status="ok",
+            result={"reason": reason or "no-op"},
+        )
 
-    def _tool_read_sensors(self, **_: Any) -> ToolResult:
-        sensors = self._state_manager.read().get("sensors") or {}
-        return ToolResult(tool="read_sensors", status="ok", result=sensors)
-
-    # Helpers ------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # HELPERS
+    # ------------------------------------------------------------------
     def _record_sensor(self, name: str, value: Any) -> None:
         self._recent_sensors[name] = {"value": value, "timestamp": time.time()}
 
-    # Legacy compatibility -----------------------------------------------
     def _read_gpu_temps(self) -> Dict[str, Any]:
-        """Expose a simple helper used by legacy UI components."""
+        """Legacy helper used by UI."""
         result = self._tool_read_gpu_temps()
         if result.status == "ok":
             return result.result
