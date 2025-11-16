@@ -32,6 +32,15 @@ def arbitrate(
 
     context = context or {}
 
+    if context.get("mode") == "query":
+        return GovernorDecision(
+            verdict="inform",
+            rationale="User requested information-only response; no tool actions permitted.",
+            plan=[],
+            tool_calls=[],
+            metadata={"mode": "query"},
+        )
+
     def _finalise(decision: GovernorDecision) -> GovernorDecision:
         if context.get("force_action") and decision.verdict in {"request_more_data", "defer_to_critic"}:
             decision.verdict = "approve"

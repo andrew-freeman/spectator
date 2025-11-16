@@ -19,6 +19,19 @@ PROMPT_TEMPLATE = (
     "USER: {user_block}\n"
 )
 
+QUERY_STARTERS = ("what", "why", "how", "when", "who")
+QUERY_PHRASES = ("what is your", "previous", "history", "explain", "describe")
+COMMAND_VERBS = (
+    "set",
+    "adjust",
+    "apply",
+    "change",
+    "increase",
+    "decrease",
+    "run",
+    "execute",
+)
+
 
 class CommandInterpreter:
     """Converts free-form instructions into structured reasoning objectives."""
@@ -29,16 +42,48 @@ class CommandInterpreter:
     def interpret(self, message: str) -> Dict[str, Any]:
         """Return structured objectives/context/memory for a user message."""
 
+        mode = classify(message)
+        if mode == "query":
+            return {
+                "objectives": [
+                    "Answer the user's question using current state only and DO NOT perform actions."
+                ],
+                "context": {"mode": "query"},
+                "memory_snippets": [],
+            }
+
         user_block = json.dumps(message, ensure_ascii=False)
         prompt = PROMPT_TEMPLATE.format(user_block=user_block)
         raw = self._client.generate(prompt, stop=None)
         payload = _parse_json(raw)
+        context = dict(payload.get("context") or {})
+        context.setdefault("mode", "command")
         return {
             "objectives": _ensure_string_list(payload.get("objectives")),
-            "context": dict(payload.get("context") or {}),
+            "context": context,
             "memory_snippets": _ensure_string_list(payload.get("memory_snippets")),
             "force_action": True,
         }
+
+
+def classify(message: str) -> str:
+    """Heuristic classifier that routes messages to query or command mode."""
+
+    text = (message or "").strip().lower()
+    if not text:
+        return "query"
+
+    for starter in QUERY_STARTERS:
+        if text.startswith(starter):
+            return "query"
+
+    if any(phrase in text for phrase in QUERY_PHRASES):
+        return "query"
+
+    if any(verb in text for verb in COMMAND_VERBS):
+        return "command"
+
+    return "query"
 
 
 def _parse_json(raw: str) -> Dict[str, Any]:
@@ -59,5 +104,5 @@ def _ensure_string_list(value: Any) -> List[str]:
     return [str(value)]
 
 
-__all__ = ["CommandInterpreter"]
+__all__ = ["CommandInterpreter", "classify"]
 
