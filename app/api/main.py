@@ -21,6 +21,7 @@ from app.meta.meta_actor_runner import MetaActorRunner, MetaActorOutput
 from app.meta.meta_critic_runner import MetaCriticRunner, MetaCriticOutput
 from app.meta.meta_governor_logic import evaluate_meta_cycle
 from app.reflection.reflection_runner import ReflectionRunner
+from app.state.state_store import GLOBAL_STATE_STORE
 
 from .command_interpreter import CommandInterpreter
 from .memory_manager import MemoryManager
@@ -118,16 +119,33 @@ class ReasoningSupervisor:
         meta_summary = self._maybe_run_meta_layer()
         self.state_manager.update_last_cycle({"meta": meta_summary})
 
+        cycle_id = self.state_manager.cycle_index - 1
+        state_snapshot = self.state_manager.read()
+
         response = {
-            "cycle": self.state_manager.cycle_index - 1,
+            "cycle": cycle_id,
             "reflection": reflection or {},
             "actor": actor_payload,
             "critic": asdict(critic_output),
             "governor": asdict(decision),
             "tool_results": tool_results,
             "meta": meta_summary,
-            "state": self.state_manager.read(),
+            "state": state_snapshot,
         }
+
+        snapshot = {
+            "cycle": cycle_id,
+            "objectives": objectives,
+            "actor": actor_payload,
+            "critic": asdict(critic_output),
+            "governor": asdict(decision),
+            "tool_results": tool_results,
+            "state": state_snapshot,
+        }
+
+        GLOBAL_STATE_STORE.save_latest(snapshot)
+        GLOBAL_STATE_STORE.append_history(snapshot)
+
         return response
 
     def _maybe_run_meta_layer(self) -> Optional[Dict[str, Any]]:
@@ -313,8 +331,14 @@ def hx_run_cycle(
 
 
 @app.get("/history")
-def get_history(supervisor: ReasoningSupervisor = Depends(get_supervisor)) -> Dict[str, Any]:
-    return {"history": supervisor.state_manager.history()}
+def ui_history(request: Request):
+    return templates.TemplateResponse("history.html", {"request": request})
+
+
+@app.get("/ui/history/list")
+def ui_history_list():
+    history = GLOBAL_STATE_STORE.load_history(50)
+    return templates.TemplateResponse("history_list.html", {"history": history})
 
 
 @app.post("/command")
@@ -520,6 +544,16 @@ def debug_system(
 @app.get("/api/debug-system")
 def debug_system_api(supervisor: ReasoningSupervisor = Depends(get_supervisor)) -> Dict[str, Any]:
     return _build_debug_snapshot(supervisor)
+
+
+@app.get("/api/state/latest")
+def api_state_latest():
+    return GLOBAL_STATE_STORE.load_latest() or {}
+
+
+@app.get("/api/state/history")
+def api_state_history(limit: int = 50):
+    return GLOBAL_STATE_STORE.load_history(limit)
 
 
 @app.on_event("startup")
