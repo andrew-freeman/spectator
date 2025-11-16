@@ -1,0 +1,31 @@
+{% set state_snapshot = result.state if result.state is defined else result.get('state', {}) %}
+<details class="bg-white border border-slate-200 p-4 rounded-lg shadow" open>
+  <summary class="font-semibold cursor-pointer flex items-center justify-between">
+    <span>Cycle {{ result.cycle }}</span>
+    <span class="text-xs uppercase tracking-wide px-2 py-1 rounded-full {{ 'bg-green-100 text-green-800' if result.governor.verdict == 'approve' else 'bg-amber-100 text-amber-800' }}">
+      {{ result.governor.verdict | replace('_', ' ') | title }}
+    </span>
+  </summary>
+  <div class="mt-4 space-y-3 text-sm">
+    <details class="bg-slate-50 rounded p-3" open>
+      <summary class="font-medium cursor-pointer">Actor Analysis</summary>
+      <pre class="mt-2 overflow-x-auto">{{ result.actor | tojson(indent=2) }}</pre>
+    </details>
+    <details class="bg-slate-50 rounded p-3">
+      <summary class="font-medium cursor-pointer">Critic Evaluation</summary>
+      <pre class="mt-2 overflow-x-auto">{{ result.critic | tojson(indent=2) }}</pre>
+    </details>
+    <details class="bg-slate-50 rounded p-3">
+      <summary class="font-medium cursor-pointer">Governor Verdict</summary>
+      <pre class="mt-2 overflow-x-auto">{{ result.governor | tojson(indent=2) }}</pre>
+    </details>
+    <details class="bg-slate-50 rounded p-3">
+      <summary class="font-medium cursor-pointer">Tool Results</summary>
+      <pre class="mt-2 overflow-x-auto">{{ result.tool_results | tojson(indent=2) }}</pre>
+    </details>
+    <details class="bg-slate-50 rounded p-3">
+      <summary class="font-medium cursor-pointer">State Snapshot</summary>
+      <pre class="mt-2 overflow-x-auto">{{ state_snapshot | tojson(indent=2) }}</pre>
+    </details>
+  </div>
+</details>
