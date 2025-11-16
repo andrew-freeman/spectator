@@ -15,11 +15,10 @@ from pydantic import BaseModel, Field
 
 from app.actor.actor_runner import PlannerRunner
 from app.agent.responder import Responder
-from app.core.schemas import GovernorDecision, ReflectionOutput
 from app.critic.critic_runner import CriticRunner
-from app.governor.governor_logic import arbitrate
+from app.governor.governor_logic import GovernorDecision, arbitrate
 from app.memory.episodic_memory import EpisodicMemory
-from app.reflection.reflection_runner import ReflectionRunner
+from app.reflection.reflection_runner import ReflectionOutput, ReflectionRunner
 from app.state.state_store import GLOBAL_STATE_STORE
 
 from .command_interpreter import CommandInterpreter
@@ -33,12 +32,12 @@ logging.basicConfig(level=logging.INFO)
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 ROOT_CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+
 COG_PARAMS_PATH = CONFIG_DIR / "cog_params.json"
 SYSTEM_LIMITS_PATH = CONFIG_DIR / "system_limits.json"
 POLICY_CONFIG_PATH = ROOT_CONFIG_DIR / "policies.json"
 IDENTITY_PATH = ROOT_CONFIG_DIR / "identity.json"
 EPISODE_LOG_PATH = DATA_DIR / "episodes" / "episodes.jsonl"
-SENSITIVE_FIELD_TOKENS = ("api_key", "apikey", "token", "secret", "password")
 
 AGENT_IDENTITY = {
     "name": "Spectator",
@@ -46,6 +45,8 @@ AGENT_IDENTITY = {
     "role": "Local autonomous reasoning agent",
     "environment": "User's workstation",
 }
+
+SENSITIVE_FIELD_TOKENS = ("api_key", "apikey", "token", "secret", "password")
 
 
 class LLMClient(Protocol):
@@ -57,6 +58,34 @@ class CycleRequest(BaseModel):
     objectives: List[str] = Field(..., description="Ordered objectives for this cycle")
     context: Dict[str, Any] = Field(default_factory=dict)
     memory: List[str] = Field(default_factory=list)
+
+
+app = FastAPI()
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+TEMPLATE_DIR = BASE_DIR / "app" / "ui" / "templates"
+STATIC_DIR = BASE_DIR / "app" / "ui" / "static"
+
+templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+for key in [
+    "supervisor",
+    "command_interpreter",
+    "reflection_runner",
+    "planner_runner",
+    "critic_runner",
+    "state_manager",
+    "memory_manager",
+    "tool_executor",
+    "identity_profile",
+    "policy_config",
+    "episodic_memory",
+    "cog_params",
+    "system_limits",
+]:
+    if not hasattr(app.state, key):
+        setattr(app.state, key, None)
 
 
 class ReasoningSupervisor:
@@ -89,7 +118,6 @@ class ReasoningSupervisor:
         self.cog_params = cog_params or {}
         self.system_limits = system_limits or {}
         self.responder = Responder()
-        self.auto_objective = "Monitor and stabilize GPU thermal state."
 
     def run_user_input(
         self,
@@ -132,9 +160,7 @@ class ReasoningSupervisor:
         if context:
             reflection.context.update(context)
         current_state = self.state_manager.read()
-        memory_context = self._collect_memory_context()
-        if memory_snippets:
-            memory_context.extend(memory_snippets)
+        memory_context = self._collect_memory_context(memory_snippets)
         plan = self.planner_runner.run(
             reflection,
             current_state,
@@ -150,7 +176,10 @@ class ReasoningSupervisor:
         tool_result_objs = []
         if decision.final_tool_calls:
             tool_result_objs = self.tool_executor.execute_many(decision.final_tool_calls)
-        tool_results = [result.to_dict() for result in tool_result_objs]
+        tool_results = [
+            result.to_dict() if hasattr(result, "to_dict") else dict(result)
+            for result in tool_result_objs
+        ]
         updated_state = self.state_manager.read()
         cycle_record = {
             "cycle": cycle_id,
@@ -193,12 +222,21 @@ class ReasoningSupervisor:
             "cycle": cycle_id,
             "mode": reflection.mode,
             "tool_results": tool_results,
+            "governor": decision.to_dict(),
+            "plan": plan.to_dict(),
+            "critic": critic_output.to_dict(),
+            "reflection": reflection.to_dict(),
             "record": cycle_record,
         }
 
-    def _collect_memory_context(self, limit: int = 5) -> List[str]:
+    def _collect_memory_context(self, memory_snippets: Optional[List[str]]) -> List[str]:
         exported = self.memory_manager.export()
-        snippets = [entry["content"] for entry in exported[-limit:]]
+        snippets: List[str] = []
+        for entry in exported[-5:]:
+            if isinstance(entry, dict) and entry.get("content"):
+                snippets.append(str(entry["content"]))
+        if memory_snippets:
+            snippets.extend(memory_snippets)
         return snippets
 
     def _record_episode(
@@ -234,6 +272,20 @@ class ReasoningSupervisor:
         except OSError:
             LOGGER.warning("Failed to persist episode for cycle %s", cycle_id)
 
+
+def _load_json_or_empty(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        LOGGER.warning("Failed to load JSON from %s", path)
+    return {}
+
+
 def configure_supervisor(
     *,
     actor_client: LLMClient,
@@ -243,42 +295,66 @@ def configure_supervisor(
 
     critic_client = critic_client or actor_client
 
-    reflection_runner = ReflectionRunner(actor_client, identity_profile=app.state.identity_profile)
-    planner_runner = PlannerRunner(
-        actor_client,
-        identity=app.state.identity_profile,
-        policy=app.state.policy_config,
+    identity_profile = _load_json_or_empty(IDENTITY_PATH) or dict(AGENT_IDENTITY)
+    policy_config = _load_json_or_empty(POLICY_CONFIG_PATH) or {}
+    cog_params = _load_json_or_empty(COG_PARAMS_PATH)
+    system_limits = _load_json_or_empty(SYSTEM_LIMITS_PATH)
+
+    state_manager = StateManager()
+    memory_manager = MemoryManager()
+
+    episodic_memory: Optional[EpisodicMemory] = None
+    try:
+        episodic_memory = EpisodicMemory(EPISODE_LOG_PATH)
+    except Exception:
+        LOGGER.warning("Failed to initialise episodic memory at %s", EPISODE_LOG_PATH)
+
+    tool_executor = ToolExecutor(
+        state_manager=state_manager,
+        memory_manager=memory_manager,
+        policy_config=policy_config,
+        system_limits=system_limits,
     )
-    critic_runner = CriticRunner(
-        critic_client,
-        identity=app.state.identity_profile,
-        policy=app.state.policy_config,
-    )
+    reflection_runner = ReflectionRunner(actor_client, identity_profile=identity_profile)
+    planner_runner = PlannerRunner(actor_client, identity=identity_profile, policy=policy_config)
+    critic_runner = CriticRunner(critic_client, identity=identity_profile, policy=policy_config)
 
     supervisor = ReasoningSupervisor(
         reflection_runner=reflection_runner,
         planner_runner=planner_runner,
         critic_runner=critic_runner,
-        state_manager=app.state.state_manager,
-        memory_manager=app.state.memory_manager,
-        tool_executor=app.state.tool_executor,
-        identity_profile=app.state.identity_profile,
-        policy_config=app.state.policy_config,
-        episodic_memory=app.state.episodic_memory,
-        cog_params=app.state.cog_params,
-        system_limits=app.state.system_limits,
+        state_manager=state_manager,
+        memory_manager=memory_manager,
+        tool_executor=tool_executor,
+        identity_profile=identity_profile,
+        policy_config=policy_config,
+        episodic_memory=episodic_memory,
+        cog_params=cog_params,
+        system_limits=system_limits,
     )
+
     app.state.supervisor = supervisor
     app.state.command_interpreter = CommandInterpreter(actor_client)
     app.state.reflection_runner = reflection_runner
     app.state.planner_runner = planner_runner
     app.state.critic_runner = critic_runner
+    app.state.state_manager = state_manager
+    app.state.memory_manager = memory_manager
+    app.state.tool_executor = tool_executor
+    app.state.identity_profile = identity_profile
+    app.state.policy_config = policy_config
+    app.state.episodic_memory = episodic_memory
+    app.state.cog_params = cog_params
+    app.state.system_limits = system_limits
 
 
 def get_supervisor() -> ReasoningSupervisor:
     supervisor: Optional[ReasoningSupervisor] = getattr(app.state, "supervisor", None)
     if supervisor is None:
-        raise HTTPException(status_code=503, detail="Supervisor not configured. Call configure_supervisor first.")
+        raise HTTPException(
+            status_code=503,
+            detail="Supervisor not configured. Call configure_supervisor first.",
+        )
     return supervisor
 
 
@@ -287,13 +363,6 @@ def get_command_interpreter() -> CommandInterpreter:
     if interpreter is None:
         raise HTTPException(status_code=503, detail="Command interpreter not configured.")
     return interpreter
-
-
-def get_reflection_runner() -> ReflectionRunner:
-    rr: Optional[ReflectionRunner] = getattr(app.state, "reflection_runner", None)
-    if rr is None:
-        raise HTTPException(status_code=503, detail="Reflection runner not configured.")
-    return rr
 
 
 @app.get("/health")
@@ -319,8 +388,8 @@ def chat_page(request: Request, supervisor: ReasoningSupervisor = Depends(get_su
 def cycles_page(request: Request, supervisor: ReasoningSupervisor = Depends(get_supervisor)):
     state = supervisor.state_manager.read()
     history = supervisor.state_manager.history()
-    gpu_temps = app.state.tool_executor._read_gpu_temps()
-    episodes = app.state.episodic_memory.tail(5) if app.state.episodic_memory else []
+    gpu_temps = supervisor.tool_executor._read_gpu_temps()
+    episodes = supervisor.episodic_memory.tail(5) if supervisor.episodic_memory else []
     return templates.TemplateResponse(
         "cycles.html",
         {
@@ -357,7 +426,10 @@ def hx_run_cycle(
         context=cycle_request.context,
         memory_snippets=cycle_request.memory,
     )
-    return templates.TemplateResponse("cycle_row.html", {"request": request, "result": result})
+    return templates.TemplateResponse(
+        "cycle_row.html",
+        {"request": request, "result": result, "state_snapshot": result.get("state", {})},
+    )
 
 
 @app.get("/history")
@@ -388,7 +460,7 @@ async def command(
     if not message:
         raise HTTPException(400, "No command message provided")
 
-    LOGGER.info(f"Received command message: {message}")
+    LOGGER.info("Received command message: %s", message)
     structured = interpreter.interpret(message)
     structured_context = dict(structured.get("context", {}))
     if structured.get("force_action"):
@@ -398,7 +470,10 @@ async def command(
         context=structured_context,
         memory_snippets=structured.get("memory_snippets", []),
     )
-    return templates.TemplateResponse("cycle_row.html", {"result": cycle_result, "request": request})
+    return templates.TemplateResponse(
+        "cycle_row.html",
+        {"request": request, "result": cycle_result, "state_snapshot": cycle_result.get("state", {})},
+    )
 
 
 @app.post("/api/chat")
@@ -406,7 +481,6 @@ async def chat_api(
     request: Request,
     supervisor: ReasoningSupervisor = Depends(get_supervisor),
 ):
-    # Extract message
     message = None
     try:
         form = await request.form()
@@ -430,6 +504,7 @@ async def chat_api(
         "chat_message_agent.html",
         {"request": request, "message": final_message},
     )
+
 
 def _is_sensitive_key(key: str) -> bool:
     lowered = key.lower()
@@ -504,10 +579,10 @@ def api_state_history(limit: int = 50):
 async def auto_cycle_loop() -> None:
     import asyncio
 
-    supervisor = app.state.supervisor
-
-    if not supervisor:
-        LOGGER.warning("Supervisor not configured at startup.")
+    try:
+        supervisor = get_supervisor()
+    except HTTPException:
+        LOGGER.warning("Supervisor not configured at startup; auto-cycle disabled.")
         return
 
     async def _loop() -> None:

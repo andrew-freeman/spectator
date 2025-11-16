@@ -62,4 +62,4 @@ def arbitrate(
     )
 
 
-__all__ = ["arbitrate"]
+__all__ = ["arbitrate", "GovernorDecision"]
