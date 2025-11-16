@@ -3,12 +3,12 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-from app.core.schemas import CriticOutput, GovernorDecision, PlannerPlan, ToolCall
+from app.core.schemas import CriticReview, GovernorDecision, PlannerPlan, ToolCall
 
 
 def arbitrate(
     plan: PlannerPlan,
-    critic: CriticOutput,
+    critic: CriticReview,
     *,
     mode: str,
     context: Dict[str, object] | None = None,

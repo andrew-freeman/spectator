@@ -7,6 +7,7 @@ import time
 from typing import Any, Dict, List, Sequence
 
 from app.core.schemas import ToolCall, ToolResult
+from app.core.tool_registry import ToolRegistry
 
 from .memory_manager import MemoryManager
 from .state_manager import StateManager
@@ -30,6 +31,8 @@ class ToolExecutor:
         self._policy_config = policy_config or {}
         self._system_limits = system_limits or {}
         self._recent_sensors: Dict[str, Dict[str, Any]] = {}
+        self._registry = ToolRegistry()
+        self._register_tools()
 
         bounds = (self._system_limits.get("fan_speed_bounds") or {})
         self._fan_min = float(bounds.get("min", 0.0))
@@ -39,7 +42,7 @@ class ToolExecutor:
     # EXECUTION DISPATCH
     # ------------------------------------------------------------------
     def execute(self, call: ToolCall) -> ToolResult:
-        handler = getattr(self, f"_tool_{call.name}", None)
+        handler = self._registry.declared_tools.get(call.name)
         if handler is None:
             return ToolResult(
                 tool=call.name,
@@ -48,7 +51,8 @@ class ToolExecutor:
                 error=f"Unknown tool: {call.name}",
             )
         try:
-            return handler(**call.arguments)
+            arguments = self._registry.validate_arguments(call.name, call.arguments)
+            return handler(**arguments)
         except Exception as exc:
             LOGGER.exception("Tool %s failed", call.name)
             return ToolResult(
@@ -205,3 +209,13 @@ class ToolExecutor:
 
 
 __all__ = ["ToolExecutor"]
+    def _register_tools(self) -> None:
+        self._registry.register("read_gpu_temps", self._tool_read_gpu_temps)
+        self._registry.register("read_state", self._tool_read_state)
+        self._registry.register("read_sensors", self._tool_read_sensors)
+        self._registry.register("set_fan_speed", self._tool_set_fan_speed)
+        self._registry.register("noop_control", self._tool_noop_control)
+
+    @property
+    def registry(self) -> ToolRegistry:
+        return self._registry

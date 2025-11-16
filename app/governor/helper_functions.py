@@ -5,17 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
-from app.actor.actor_runner import ActorOutput, ToolCall
-from app.critic.critic_runner import CriticOutput
+from app.core.schemas import CriticReview, PlannerPlan, ToolCall
 
 
 @dataclass
 class MergedPlan:
-    """Container describing the reconciled plan between actor and critic."""
+    """Container describing the reconciled plan between planner and critic."""
 
     steps: List[str]
     notes: Optional[str] = None
-    tool_calls: List[ToolCall] = None
+    tool_calls: List[ToolCall] | None = None
 
 
 def normalise_plan(steps: Iterable[str]) -> List[str]:
@@ -24,29 +23,25 @@ def normalise_plan(steps: Iterable[str]) -> List[str]:
     return [step.strip() for step in steps if isinstance(step, str) and step.strip()]
 
 
-def summarise_disagreements(actor: ActorOutput, critic: CriticOutput) -> Dict[str, Any]:
+def summarise_disagreements(plan: PlannerPlan, critic: CriticReview) -> Dict[str, Any]:
     """Produce a simple dictionary of disagreement metadata."""
 
     return {
         "issues": critic.detected_issues,
-        "recommendations": critic.recommendations,
-        "actor_information_gaps": actor.information_gaps,
+        "planner_steps": plan.steps,
+        "critic_notes": critic.notes,
     }
 
 
-def merge_plans(actor: ActorOutput, critic: CriticOutput) -> MergedPlan:
-    """Combine actor plan with critic recommendations deterministically."""
+def merge_plans(plan: PlannerPlan, critic: CriticReview) -> MergedPlan:
+    """Combine planner steps with critic issues deterministically."""
 
-    steps = normalise_plan(actor.plan)
-    for rec in critic.recommendations:
-        if rec not in steps:
-            steps.append(rec)
-
+    steps = normalise_plan(plan.steps)
     notes = None
     if critic.detected_issues:
         notes = "Critic flagged issues: " + "; ".join(critic.detected_issues)
 
-    return MergedPlan(steps=steps, notes=notes, tool_calls=actor.tool_calls)
+    return MergedPlan(steps=steps, notes=notes, tool_calls=plan.tool_calls)
 
 
 __all__ = ["MergedPlan", "merge_plans", "normalise_plan", "summarise_disagreements"]
