@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Dict, Iterable, Optional, Protocol
 
 from app.core.schemas import ReflectionOutput
@@ -94,11 +95,27 @@ class ReflectionRunner:
         try:
             raw = self._client.generate(prompt, stop=None)
             payload = self._parse_json(raw)
-            return self._build_output(payload, fallback_message=message)
+            output = self._build_output(payload, fallback_message=message)
+
+            # --- Lightweight post-heuristics for stability ---
+            lower = message.lower()
+
+            # Simple math / symbolic expressions → knowledge
+            #if any(sym in lower for sym in ["2+2", " 2 + 2", "+", "-", "*", "/", "integrate", "derivative"]):
+            if re.search(r"\d+\s*[\+\-\*/]\s*\d+", lower):
+                if output.mode not in {"world_query", "world_control"}:
+                    output.mode = "knowledge"  # type: ignore[attr-defined]
+
+            # Classic reasoning / puzzle keywords → knowledge
+            if any(kw in lower for kw in ["cup", "nut inside", "mirror", "reflection puzzle"]):
+                if output.mode not in {"world_query", "world_control"}:
+                    output.mode = "knowledge"  # type: ignore[attr-defined]
+
+            return output
+
         except Exception:
-            # Safe fallback: treat as chat.
             return ReflectionOutput(
-                mode="chat",  # type: ignore[arg-type]
+                mode="chat",
                 goal=message.strip() or "General conversation",
                 context={},
                 needs_clarification=False,
@@ -142,7 +159,8 @@ class ReflectionRunner:
             context = {}
 
         needs_clarification = bool(payload.get("needs_clarification", False))
-        notes = str(payload.get("reflection_notes", "")).strip()
+        #notes = str(payload.get("reflection_notes", "")).strip()
+        notes = payload.get("reflection_notes") or ""
 
         return ReflectionOutput(
             mode=mode,  # type: ignore[arg-type]
