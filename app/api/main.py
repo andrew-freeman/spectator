@@ -11,6 +11,7 @@ from typing import Any, Dict, Iterable, List, Optional, Protocol
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from app.actor.actor_runner import ActorRunner
@@ -245,13 +246,33 @@ def healthcheck() -> Dict[str, str]:
 
 
 @app.get("/")
-def dashboard(request: Request, supervisor: ReasoningSupervisor = Depends(get_supervisor)):
+def root_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/chat", status_code=307)
+
+
+@app.get("/chat")
+def chat_page(request: Request, supervisor: ReasoningSupervisor = Depends(get_supervisor)):
+    history = supervisor.state_manager.history()
+    return templates.TemplateResponse(
+        "chat.html",
+        {"request": request, "history": history, "active_tab": "chat"},
+    )
+
+
+@app.get("/cycles")
+def cycles_page(request: Request, supervisor: ReasoningSupervisor = Depends(get_supervisor)):
     state = supervisor.state_manager.read()
     history = supervisor.state_manager.history()
     gpu_temps = app.state.tool_executor._read_gpu_temps()
     return templates.TemplateResponse(
-        "dashboard.html",
-        {"request": request, "state": state, "history": history, "gpu_temps": gpu_temps},
+        "cycles.html",
+        {
+            "request": request,
+            "state": state,
+            "history": history,
+            "gpu_temps": gpu_temps,
+            "active_tab": "cycles",
+        },
     )
 
 
@@ -307,6 +328,49 @@ async def command(
     return templates.TemplateResponse("cycle_row.html", {"result": cycle_result, "request": request})
 
 
+@app.post("/api/chat")
+async def chat_endpoint(
+    request: Request,
+    message: Optional[str] = Form(None),
+    supervisor: ReasoningSupervisor = Depends(get_supervisor),
+    interpreter: CommandInterpreter = Depends(get_command_interpreter),
+):
+    if message is None:
+        try:
+            body = await request.json()
+        except Exception:  # pragma: no cover - malformed payload safeguard
+            body = {}
+        message = (body or {}).get("message")
+
+    if not message:
+        raise HTTPException(400, "No chat message provided")
+
+    LOGGER.info("Chat message received: %s", message)
+    structured = interpreter.interpret(message)
+    objectives = structured.get("objectives") or [message]
+    context = structured.get("context", {})
+    memory_snippets = structured.get("memory_snippets", [])
+
+    cycle_result = supervisor.run_cycle(objectives, context=context, memory_snippets=memory_snippets)
+    agent_message = "Running a reasoning cycle for: " + ", ".join(objectives)
+
+    user_template = templates.get_template("chat_message_user.html")
+    agent_template = templates.get_template("chat_message_agent.html")
+    cycle_template = templates.get_template("cycle_row.html")
+
+    content = "".join(
+        [
+            user_template.render({"request": request, "message": message}),
+            agent_template.render({"request": request, "message": agent_message}),
+            '<div class="mt-2">',
+            cycle_template.render({"request": request, "result": cycle_result}),
+            "</div>",
+        ]
+    )
+
+    return HTMLResponse(content)
+
+
 def _is_sensitive_key(key: str) -> bool:
     lowered = key.lower()
     return any(token in lowered for token in SENSITIVE_FIELD_TOKENS)
@@ -325,8 +389,7 @@ def _sanitize_snapshot(data: Any) -> Any:
     return data
 
 
-@app.get("/debug-system")
-def debug_system(supervisor: ReasoningSupervisor = Depends(get_supervisor)) -> Dict[str, Any]:
+def _build_debug_snapshot(supervisor: ReasoningSupervisor) -> Dict[str, Any]:
     history = supervisor.state_manager.history()
     last_cycle = history[-1] if history else {}
 
@@ -349,6 +412,23 @@ def debug_system(supervisor: ReasoningSupervisor = Depends(get_supervisor)) -> D
         "state": state_snapshot,
         "cog_params": cog_params_snapshot,
     }
+
+
+@app.get("/debug-system")
+def debug_system(
+    request: Request,
+    supervisor: ReasoningSupervisor = Depends(get_supervisor),
+):
+    snapshot = _build_debug_snapshot(supervisor)
+    return templates.TemplateResponse(
+        "debug.html",
+        {"request": request, "snapshot": snapshot, "active_tab": "debug"},
+    )
+
+
+@app.get("/api/debug-system")
+def debug_system_api(supervisor: ReasoningSupervisor = Depends(get_supervisor)) -> Dict[str, Any]:
+    return _build_debug_snapshot(supervisor)
 
 
 @app.on_event("startup")

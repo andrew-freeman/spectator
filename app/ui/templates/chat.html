@@ -1,0 +1,55 @@
+{% extends "layout.html" %}
+{% block title %}Spectator Chat Interface{% endblock %}
+{% block content %}
+<section class="bg-white rounded-xl shadow border border-slate-200 p-6">
+  <h2 class="text-3xl font-semibold mb-2">Conversational Control</h2>
+  <p class="text-slate-500 text-sm">
+    Use natural-language instructions to provide new objectives. Spectator will interpret your intent,
+    launch a reasoning cycle, and report the full trace below. This chat flow is the recommended way to
+    steer the system.
+  </p>
+</section>
+
+<section class="bg-white rounded-xl shadow border border-slate-200 p-0">
+  <div
+    id="chat-history"
+    class="h-[65vh] overflow-y-auto space-y-4 px-6 py-6"
+    hx-on::afterSwap="this.scrollTop = this.scrollHeight">
+    {% include "chat_message_agent.html" with message="Welcome! Tell me what objective you'd like me to pursue and I'll run the appropriate reasoning cycle." %}
+    {% for result in history %}
+      <div>
+        {% include "cycle_row.html" %}
+      </div>
+    {% endfor %}
+  </div>
+  <div class="border-t border-slate-200 px-6 py-4 bg-slate-50">
+    <form
+      hx-post="/api/chat"
+      hx-target="#chat-history"
+      hx-swap="beforeend"
+      hx-trigger="submit"
+      hx-on::afterRequest="this.reset()"
+      class="flex gap-3">
+      <input
+        type="text"
+        name="message"
+        placeholder="Ask Spectator to pursue a new objective..."
+        class="flex-1 border border-slate-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        required />
+      <button
+        type="submit"
+        class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-lg shadow">
+        Send
+      </button>
+    </form>
+  </div>
+</section>
+
+<script>
+  document.addEventListener('htmx:afterSwap', (event) => {
+    if (event.target && event.target.id === 'chat-history') {
+      event.target.scrollTop = event.target.scrollHeight;
+    }
+  });
+</script>
+{% endblock %}

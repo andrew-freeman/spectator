@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block body %}
+  <div class="bg-slate-900 text-white shadow-md">
+    <div class="max-w-6xl mx-auto flex items-center justify-between px-6 py-4">
+      <div>
+        <p class="text-sm uppercase tracking-widest text-slate-400">Spectator</p>
+        <h1 class="text-2xl font-semibold">Cognitive Control Center</h1>
+      </div>
+      <nav class="flex space-x-4 text-sm">
+        {% set tabs = [
+          {"name": "Chat", "href": "/chat", "id": "chat"},
+          {"name": "Cycles", "href": "/cycles", "id": "cycles"},
+          {"name": "Debug", "href": "/debug-system", "id": "debug"},
+        ] %}
+        {% for tab in tabs %}
+          {% set is_active = (active_tab == tab.id) %}
+          <a
+            href="{{ tab.href }}"
+            class="px-3 py-2 rounded-lg transition {{ 'bg-white text-slate-900 font-semibold' if is_active else 'text-slate-300 hover:text-white' }}">
+            {{ tab.name }}
+          </a>
+        {% endfor %}
+      </nav>
+    </div>
+  </div>
+  <main class="max-w-6xl mx-auto px-6 py-10 space-y-6">
+    {% block content %}{% endblock %}
+  </main>
+{% endblock %}
