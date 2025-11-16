@@ -268,10 +268,10 @@ def get_command_interpreter() -> CommandInterpreter:
 
 
 def get_reflection_runner() -> ReflectionRunner:
-    runner: Optional[ReflectionRunner] = getattr(app.state, "reflection_runner", None)
-    if runner is None:
+    rr: Optional[ReflectionRunner] = getattr(app.state, "reflection_runner", None)
+    if rr is None:
         raise HTTPException(status_code=503, detail="Reflection runner not configured.")
-    return runner
+    return rr
 
 
 @app.get("/health")
@@ -384,104 +384,64 @@ async def command(
 async def chat_api(
     request: Request,
     supervisor: ReasoningSupervisor = Depends(get_supervisor),
-    interpreter: CommandInterpreter = Depends(get_command_interpreter),
-    reflection_runner: ReflectionRunner = Depends(get_reflection_runner),
 ):
     print("---- /api/chat CALLED ----")
     print("Headers:", request.headers)
 
-    raw_body = await request.body()
-    print("RAW BODY:", raw_body)
-
-    # ALWAYS define message first
-    message: Optional[str] = None
-
-    # Try form first
+    # Extract message
+    message = None
     try:
-        form_data = await request.form()
-        print("FORM DATA:", dict(form_data))
-        message = form_data.get("message")
-    except Exception as e:
-        print("FORM PARSE ERROR:", e)
+        form = await request.form()
+        message = form.get("message")
+        if message:
+            print("FORM OK:", form)
+    except:
+        pass
 
-    # Try JSON if form didn't contain message
     if not message:
         try:
-            body = await request.json()
-            print("JSON BODY:", body)
-            message = body.get("message")
-        except Exception:
-            print("JSON PARSE FAILED")
+            raw = await request.json()
+            message = raw.get("message")
+            print("JSON OK:", raw)
+        except:
+            pass
 
-    print("FINAL MESSAGE VALUE:", message)
+    print("FINAL MESSAGE:", message)
 
     if not message:
-        raise HTTPException(status_code=400, detail="No chat message provided")
+        raise HTTPException(400, "No chat message provided")
 
-    LOGGER.info(f"[CHAT] Received: {message}")
-
+    # === RUN REFLECTION FIRST ===
+    reflection_runner = get_reflection_runner()
     reflection = reflection_runner.run(message)
-    LOGGER.info("Reflection output: %s", reflection)
+    print("Reflection output:", reflection)
 
-    if reflection["intent"] == "query":
-        # Force query-mode behavior
-        context = reflection.get("context", {})
-        context["query_mode"] = True
-
-        objectives = reflection.get("refined_objectives") or [message]
-        cycle = supervisor.run_cycle(
-            objectives=objectives,
-            context=context,
-            memory_snippets=[],
+    # === CHAT MODE ===
+    if reflection["intent"] == "chat":
+        llm = supervisor.actor_runner._client
+        reply = llm.generate(
+            f"User said: '{message}'. Respond conversationally as Spectator. "
+            "Do NOT use tools. Do NOT produce JSON. Provide a natural language answer."
         )
-
-        agent_message = cycle.get("tool_results", [])
-        if not agent_message:
-            agent_message = cycle["actor"]["analysis"]
-
         return templates.TemplateResponse(
             "chat_message_agent.html",
-            {"request": request, "message": str(agent_message)},
+            {"message": reply, "request": request}
         )
 
-    if reflection.get("needs_clarification"):
-        clarification = reflection.get("reflection_notes") or "Could you clarify your request?"
-        return templates.TemplateResponse(
-            "chat_message_agent.html",
-            {"request": request, "message": clarification, "reflection": reflection.get("reflection_notes")},
-        )
-
-    intent = (reflection.get("intent") or "").strip().lower()
-    reflection_context = dict(reflection.get("context") or {})
-
-    if intent == "query":
-        objectives = reflection.get("refined_objectives") or [f"Query: {message}"]
-        context_payload = dict(reflection_context)
-        context_payload["query_mode"] = True
-    elif intent in {"command", "objective"}:
-        structured = interpreter.interpret(message)
-        objectives = structured.get("objectives") or reflection.get("refined_objectives") or [message]
-        context_payload = {**reflection_context, **(structured.get("context") or {})}
-        if structured.get("force_action"):
-            context_payload["force_action"] = True
-    else:
-        objectives = reflection.get("refined_objectives") or [message]
-        context_payload = dict(reflection_context)
-    if intent:
-        context_payload.setdefault("intent", intent)
+    # === NORMAL REASONING CYCLE ===
+    context = reflection.get("context", {})
+    objectives = reflection.get("refined_objectives") or [message]
 
     cycle = supervisor.run_cycle(
         objectives=objectives,
-        context=context_payload,
-        memory_snippets=[],
-        reflection=reflection,
+        context=context,
+        memory_snippets=[]
     )
 
-    agent_message = cycle.get("actor", {}).get("analysis") or ""
-
+    agent_msg = cycle.get("actor", {}).get("analysis") or "No analysis."
     return templates.TemplateResponse(
         "chat_message_agent.html",
-        {"request": request, "message": agent_message},
+        {"message": agent_msg, "request": request}
     )
 
 def _is_sensitive_key(key: str) -> bool:

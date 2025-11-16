@@ -83,6 +83,17 @@ class ActorRunner:
             memory=memory_block,
         )
         raw = self._client.generate(prompt, stop=None)
+
+        # CHAT MODE short-circuit
+        if ctx.get("chat_mode"):
+            return ActorOutput(
+                analysis="Chat mode active — responding without tool usage.",
+                plan=[],
+                tool_calls=[],
+                information_gaps=[],
+                confidence=1.0
+            )
+
         payload = _parse_json(raw)
         output = ActorOutput.from_json(payload)
         if ctx.get("force_action") and not output.tool_calls:
