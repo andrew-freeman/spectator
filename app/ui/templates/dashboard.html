@@ -34,8 +34,11 @@
   <section>
     <h3 class="text-xl font-semibold">Cycle History</h3>
     <p class="text-sm text-slate-500">Detailed log of each reasoning cycle, including critiques and tool usage.</p>
-    <form hx-post="/command" hx-target="#cycle-history" hx-swap="afterbegin" class="mt-4">
-      <input name="message" class="border p-2 w-full rounded" placeholder="Ask Spectator anything…">
+    <form hx-post="/command"
+          hx-target="#cycle-history"
+          hx-swap="afterbegin"
+          class="space-y-2">
+      <input name="message" class="border p-2 w-full rounded" placeholder="Ask Spectator anything…" />
     </form>
     <div id="cycle-history" class="space-y-4 mt-4">
                 {% for result in history %}

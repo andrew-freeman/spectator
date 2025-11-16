@@ -8,7 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Protocol
 
-from fastapi import Body, Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -53,10 +53,6 @@ class CycleResponse(BaseModel):
     tool_results: List[Dict[str, Any]]
     meta: Optional[Dict[str, Any]]
     state: Dict[str, Any]
-
-
-class CommandRequest(BaseModel):
-    message: str = Field(..., description="Natural language instruction for the interpreter")
 
 
 class ReasoningSupervisor:
@@ -285,27 +281,30 @@ def get_history(supervisor: ReasoningSupervisor = Depends(get_supervisor)) -> Di
 
 
 @app.post("/command")
-async def command_endpoint(
+async def command(
     request: Request,
-    payload: Optional[CommandRequest] = Body(default=None),
-    message: Optional[str] = Form(default=None),
+    message: Optional[str] = Form(None),
     supervisor: ReasoningSupervisor = Depends(get_supervisor),
     interpreter: CommandInterpreter = Depends(get_command_interpreter),
 ):
-    user_message = (payload.message if payload else None) or message
-    if not user_message:
-        raise HTTPException(status_code=422, detail="Missing command message")
+    if message is None:
+        try:
+            body = await request.json()
+            message = body.get("message")
+        except Exception:  # pragma: no cover - malformed body safeguard
+            message = None
 
-    structured = interpreter.interpret(user_message)
-    result = supervisor.run_cycle(
+    if not message:
+        raise HTTPException(400, "No command message provided")
+
+    LOGGER.info(f"Received command message: {message}")
+    structured = interpreter.interpret(message)
+    cycle_result = supervisor.run_cycle(
         structured.get("objectives", []),
         context=structured.get("context", {}),
         memory_snippets=structured.get("memory_snippets", []),
     )
-
-    if request.headers.get("hx-request") == "true":
-        return templates.TemplateResponse("cycle_row.html", {"request": request, "result": result})
-    return CycleResponse(**result)
+    return templates.TemplateResponse("cycle_row.html", {"result": cycle_result, "request": request})
 
 
 def _is_sensitive_key(key: str) -> bool:
