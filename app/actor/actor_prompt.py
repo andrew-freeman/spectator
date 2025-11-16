@@ -15,7 +15,9 @@ RULES:
   "tool_calls": [
     {{
       "name": "tool_name_here",
-      "arguments": {{ "arg": "value" }}
+      "arguments": {{
+        "arg": "value"
+      }}
     }}
   ],
   "response_type": "text",
@@ -39,31 +41,23 @@ MODES:
 
 - world_query:
   - For questions about REAL system state.
-  - Example: "What are GPU temperatures?", "What does nvidia-smi report?"
   - MUST call appropriate tools such as:
     - read_gpu_temps
     - read_system_load
     - read_fan_speeds
-  - response_type: "text" or "json" (if structured requested)
 
 - world_control:
   - For actions affecting the environment.
-  - Example: "Lower GPU temps below 55C, noise is fine."
-  - MUST call control tools such as:
-    - set_fan_speed
-  - Use human-readable 'reason' inside arguments when appropriate.
-  - response_type: "text"
-
-Do NOT wrap the JSON in code fences. Output only JSON.
+  - MUST call control tools such as set_fan_speed.
 
 You will be given:
-- MODE
-- GOAL
-- CONTEXT
-- CURRENT_STATE (system snapshot)
-- MEMORY_CONTEXT (recent summaries)
-- POLICY (constraints and thermal policy)
-- IDENTITY (who Spectator is)
+- MODE: {mode}
+- GOAL: {goal}
+- CONTEXT: {context}
+- CURRENT_STATE: {state}
+- MEMORY_CONTEXT: {memory}
+- POLICY: {policy}
+- IDENTITY: {identity}
 
-Return exactly one JSON object with the schema described above.
+Return a single JSON object in the structure above.
 """.strip()
