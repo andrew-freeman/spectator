@@ -32,6 +32,15 @@ def arbitrate(
 
     context = context or {}
 
+    if context.get("chat_mode"):
+        return GovernorDecision(
+            verdict="chat_mode",
+            rationale="Chat mode conversation; skipping tool execution.",
+            plan=[],
+            tool_calls=[],
+            metadata={"notes": "Chat intent"},
+        )
+
     if context.get("query_mode"):
         return GovernorDecision(
             verdict="query_mode",

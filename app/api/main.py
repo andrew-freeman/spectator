@@ -224,6 +224,13 @@ templates = Jinja2Templates(directory="app/ui/templates")
 app.mount("/static", StaticFiles(directory="app/ui/static"), name="static")
 
 
+def natural_chat_response(user_msg: str) -> str:
+    return (
+        "I am Spectator, your reflection-driven autonomous reasoning system. "
+        f"You said: '{user_msg}'. How can I assist you?"
+    )
+
+
 def configure_supervisor(
     *,
     actor_client: LLMClient,
@@ -411,37 +418,59 @@ async def chat_api(
     if not message:
         raise HTTPException(400, "No chat message provided")
 
-    # === RUN REFLECTION FIRST ===
     reflection_runner = get_reflection_runner()
     reflection = reflection_runner.run(message)
     print("Reflection output:", reflection)
 
-    # === CHAT MODE ===
-    if reflection["intent"] == "chat":
-        llm = supervisor.actor_runner._client
-        reply = llm.generate(
-            f"User said: '{message}'. Respond conversationally as Spectator. "
-            "Do NOT use tools. Do NOT produce JSON. Provide a natural language answer."
+    intent = (reflection or {}).get("intent", "ambiguous")
+
+    if intent == "chat":
+        return templates.TemplateResponse(
+            "chat_message_agent.html",
+            {"request": request, "message": natural_chat_response(message)},
+        )
+
+    if intent == "query":
+        ctx = dict(reflection.get("context", {}))
+        ctx["query_mode"] = True
+        objectives = reflection.get("refined_objectives") or [message]
+        cycle = supervisor.run_cycle(
+            objectives=objectives,
+            context=ctx,
+            memory_snippets=[],
+        )
+        agent_message = json.dumps(cycle["tool_results"], indent=2)
+        return templates.TemplateResponse(
+            "chat_message_agent.html",
+            {"request": request, "message": agent_message},
+        )
+
+    if intent == "command":
+        objectives = reflection.get("refined_objectives") or [message]
+        supervisor.run_cycle(
+            objectives=objectives,
+            context=reflection.get("context", {}),
+            memory_snippets=[],
         )
         return templates.TemplateResponse(
             "chat_message_agent.html",
-            {"message": reply, "request": request}
+            {"request": request, "message": "Action completed."},
         )
 
-    # === NORMAL REASONING CYCLE ===
-    context = reflection.get("context", {})
-    objectives = reflection.get("refined_objectives") or [message]
+    if intent == "objective":
+        supervisor.run_cycle(
+            objectives=reflection.get("refined_objectives", []),
+            context=reflection.get("context", {}),
+            memory_snippets=[],
+        )
+        return templates.TemplateResponse(
+            "chat_message_agent.html",
+            {"request": request, "message": "Objective registered."},
+        )
 
-    cycle = supervisor.run_cycle(
-        objectives=objectives,
-        context=context,
-        memory_snippets=[]
-    )
-
-    agent_msg = cycle.get("actor", {}).get("analysis") or "No analysis."
     return templates.TemplateResponse(
         "chat_message_agent.html",
-        {"message": agent_msg, "request": request}
+        {"request": request, "message": natural_chat_response(message)},
     )
 
 def _is_sensitive_key(key: str) -> bool:

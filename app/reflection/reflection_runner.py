@@ -17,35 +17,28 @@ class SupportsGenerate(Protocol):
 REFLECTION_PROMPT = """
 You are a careful reflection module that analyses the USER MESSAGE before any tools run.
 
-Your job is to classify the message and decide whether the system should:
-- run a reasoning+tool cycle, OR
-- stay in pure conversational mode.
-
-Return STRICT JSON with the following keys:
+Return STRICT JSON with these keys:
 - intent: one of ["query", "command", "objective", "chat", "ambiguous"]
-- refined_objectives: array of concise objective strings (may be empty)
-- context: JSON object with structured hints (may be empty)
+- refined_objectives: array of concise objectives (may be empty)
+- context: JSON object (may be empty)
 - needs_clarification: boolean
-- reflection_notes: short explanation of reasoning
+- reflection_notes: short explanation
 
-Rules:
-- If user asks about YOU, system personality, emotions, identity, or casual conversation:
-    intent = "chat"
-- If user expresses gratitude, jokes, or small talk:
-    intent = "chat"
-- If the message requires tools (readings, settings, controls):
-    intent = "query" or "command"
-- If message expresses a high-level goal:
-    intent = "objective"
+Classification rules:
+- If user asks about identity, opinions, personality → intent="chat"
+- If user engages in casual conversation → intent="chat"
+- If user asks for system information or readings → intent="query"
+- If user asks to change system state or apply settings → intent="command"
+- If user sets a high-level goal → intent="objective"
 
-Example:
-{
+Example output:
+{{
   "intent": "chat",
   "refined_objectives": [],
-  "context": {"chat_mode": true},
+  "context": {{"chat_mode": true}},
   "needs_clarification": false,
   "reflection_notes": "User is asking about the agent's identity."
-}
+}}
 
 USER MESSAGE:
 '''{message}'''
@@ -95,24 +88,28 @@ class ReflectionRunner:
 
     def run(self, message: str) -> Dict[str, Any]:
         prompt = REFLECTION_PROMPT.format(message=message)
+        fallback = ReflectionOutput(
+            intent="ambiguous",
+            refined_objectives=[],
+            context={},
+            needs_clarification=False,
+            reflection_notes="Reflection fallback invoked.",
+        )
+
         try:
             raw = self._client.generate(prompt, stop=None)
+            print("RAW REFLECTION OUTPUT:", raw)
+        except Exception:
+            return fallback.to_dict()
+
+        try:
             payload = json.loads(raw)
             output = ReflectionOutput.from_payload(payload)
-
-            # Inject chat_mode automatically
             if output.intent == "chat":
                 output.context["chat_mode"] = True
+            return output.to_dict()
         except Exception:
-            # Defensive fallback keeps pipeline resilient.
-            output = ReflectionOutput(
-                intent="ambiguous",
-                refined_objectives=[],
-                context={},
-                needs_clarification=False,
-                reflection_notes="Reflection fallback invoked; defaulting to standard planning.",
-            )
-        return output.to_dict()
+            return fallback.to_dict()
 
 
 __all__ = ["ReflectionRunner", "ReflectionOutput"]
