@@ -12,9 +12,10 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse
+from markupsafe import Markup
 from pydantic import BaseModel, Field
 
-from app.actor.actor_runner import ActorRunner
+from app.actor.actor_runner import ActorRunner, ActorOutput
 from app.critic.critic_runner import CriticRunner
 from app.governor.governor_logic import arbitrate
 from app.meta.meta_actor_runner import MetaActorRunner, MetaActorOutput
@@ -315,6 +316,21 @@ templates = Jinja2Templates(directory="app/ui/templates")
 app.mount("/static", StaticFiles(directory="app/ui/static"), name="static")
 
 
+def format_agent_reply(actor_output: ActorOutput, tool_results: List[Dict[str, Any]]) -> str:
+    """Render a human-friendly agent reply while keeping the core agent JSON intact."""
+    reply = {
+        "analysis": actor_output.analysis,
+        "plan": actor_output.plan,
+        "tool_calls": [
+            {"tool": tc.tool_name, "arguments": tc.arguments}
+            for tc in actor_output.tool_calls
+        ],
+        "tool_results": tool_results,
+        "confidence": actor_output.confidence,
+    }
+    return json.dumps(reply, indent=2)
+
+
 def natural_chat_response(user_msg: str) -> str:
     profile: Dict[str, Any] = getattr(app.state, "identity_profile", {})
     name = profile.get("name", "Spectator")
@@ -538,10 +554,15 @@ async def chat_api(
             context=ctx,
             memory_snippets=[],
         )
-        agent_message = json.dumps(cycle["tool_results"], indent=2)
+        actor_output = ActorOutput.from_json(cycle.get("actor", {}))
+        tool_results = cycle.get("tool_results", [])
+        formatted_reply = format_agent_reply(actor_output, tool_results)
         return templates.TemplateResponse(
             "chat_message_agent.html",
-            {"request": request, "message": agent_message},
+            {
+                "request": request,
+                "message": Markup(f"<pre>{formatted_reply}</pre>"),
+            },
         )
 
     if intent == "command":
