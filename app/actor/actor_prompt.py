@@ -14,7 +14,7 @@ RULES:
   "steps": ["step 1", "step 2"],
   "tool_calls": [
     {
-      "name": "tool_name_here",
+      "tool_name": "tool_name_here",
       "arguments": { "arg": "value" }
     }
   ],

@@ -45,7 +45,7 @@ def build_critic_prompt(
           "issues": ["List specific problems or contradictions"],
           "suggestions": ["Optional actionable improvements"],
           "adjusted_steps": ["Optional revised steps"],
-          "adjusted_tool_calls": [{{"name": "tool", "arguments": {{}}}}],
+          "adjusted_tool_calls": [{{"tool_name": "tool", "arguments": {{}}}}],
           "confidence": 0.0-1.0 number showing confidence in this review,
           "notes": "Short natural-language summary"
         }}

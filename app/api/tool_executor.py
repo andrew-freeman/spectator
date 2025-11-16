@@ -78,24 +78,28 @@ class ToolExecutor:
             return {"error": str(exc)}
 
     def execute(self, tool_call: ToolCall) -> ToolResult:
-        handler = getattr(self, f"_tool_{tool_call.tool_name}", None)
-        spec = self._tool_specs.get(tool_call.tool_name)
+        tool_name = getattr(tool_call, "tool_name", None)
+        if not tool_name:
+            raise ValueError(f"Invalid tool call, missing tool_name: {tool_call}")
+
+        handler = getattr(self, f"_tool_{tool_name}", None)
+        spec = self._tool_specs.get(tool_name)
         if handler is None or spec is None:
-            return _error_payload(tool_call.tool_name, f"Unknown tool: {tool_call.tool_name}")
+            return _error_payload(tool_name, f"Unknown tool: {tool_name}")
 
         arguments = dict(tool_call.arguments or {})
-        error = self._validate_tool_call(tool_call.tool_name, arguments, spec)
+        error = self._validate_tool_call(tool_name, arguments, spec)
         if error:
-            return _error_payload(tool_call.tool_name, error)
+            return _error_payload(tool_name, error)
 
         try:
             payload = handler(arguments)
         except Exception as exc:  # pragma: no cover - defensive guard
-            LOGGER.exception("Tool %s failed", tool_call.tool_name)
-            return _error_payload(tool_call.tool_name, str(exc))
+            LOGGER.exception("Tool %s failed", tool_name)
+            return _error_payload(tool_name, str(exc))
 
-        self._last_call_time[tool_call.tool_name] = time.monotonic()
-        return _to_tool_result(tool_call.tool_name, payload)
+        self._last_call_time[tool_name] = time.monotonic()
+        return _to_tool_result(tool_name, payload)
 
     def execute_many(self, tool_calls: List[ToolCall]) -> List[ToolResult]:
         results: List[ToolResult] = []
