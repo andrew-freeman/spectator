@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Protocol
 
@@ -15,15 +14,12 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from app.actor.actor_runner import PlannerRunner
-from app.core.schemas import AgentCycleOutput, CriticOutput, ToolResult, UserInput
+from app.agent.responder import Responder
+from app.core.schemas import GovernorDecision, ReflectionOutput
 from app.critic.critic_runner import CriticRunner
-from app.governor.governor_logic import decide as governor_decide
-from app.meta.meta_actor_runner import MetaActorRunner, MetaActorOutput
-from app.meta.meta_critic_runner import MetaCriticRunner, MetaCriticOutput
-from app.meta.meta_governor_logic import evaluate_meta_cycle
+from app.governor.governor_logic import arbitrate
 from app.memory.episodic_memory import EpisodicMemory
 from app.reflection.reflection_runner import ReflectionRunner
-from app.response.responder_runner import ResponderRunner
 from app.state.state_store import GLOBAL_STATE_STORE
 
 from .command_interpreter import CommandInterpreter
@@ -63,405 +59,191 @@ class CycleRequest(BaseModel):
     memory: List[str] = Field(default_factory=list)
 
 
-class CycleResponse(BaseModel):
-    cycle: int
-    reflection: Optional[Dict[str, Any]] = None
-    actor: Dict[str, Any]
-    critic: Dict[str, Any]
-    governor: Dict[str, Any]
-    tool_results: List[Dict[str, Any]]
-    meta: Optional[Dict[str, Any]]
-    state: Dict[str, Any]
-
-
 class ReasoningSupervisor:
-    """Coordinates planner, critic, governor, and meta layers."""
+    """Coordinates the v2 reasoning pipeline."""
 
     def __init__(
         self,
+        *,
+        reflection_runner: ReflectionRunner,
         planner_runner: PlannerRunner,
         critic_runner: CriticRunner,
-        reflection_runner: ReflectionRunner,
-        responder_runner: Optional[ResponderRunner],
-        meta_actor_runner: MetaActorRunner,
-        meta_critic_runner: MetaCriticRunner,
         state_manager: StateManager,
         memory_manager: MemoryManager,
         tool_executor: ToolExecutor,
-        cog_params: Dict[str, Any],
-        system_limits: Dict[str, Any],
-        policy_config: Dict[str, Any],
         identity_profile: Dict[str, Any],
-        episodic_memory: EpisodicMemory,
-        config_path: Path = COG_PARAMS_PATH,
+        policy_config: Dict[str, Any],
+        episodic_memory: Optional[EpisodicMemory] = None,
+        cog_params: Optional[Dict[str, Any]] = None,
+        system_limits: Optional[Dict[str, Any]] = None,
     ) -> None:
+        self.reflection_runner = reflection_runner
         self.planner_runner = planner_runner
         self.critic_runner = critic_runner
-        self.reflection_runner = reflection_runner
-        self.responder_runner = responder_runner
-        self.meta_actor_runner = meta_actor_runner
-        self.meta_critic_runner = meta_critic_runner
         self.state_manager = state_manager
         self.memory_manager = memory_manager
         self.tool_executor = tool_executor
-        self.cog_params = cog_params
-        self.system_limits = system_limits
-        self.policy_config = policy_config
-        self.identity_profile = identity_profile
+        self.identity_profile = identity_profile or AGENT_IDENTITY
+        self.policy_config = policy_config or {}
         self.episodic_memory = episodic_memory
-        self._config_path = config_path
-        self._meta_cycle_index = 0
-        self._meta_frequency = int(self.cog_params.get("meta_frequency", 3) or 3)
+        self.cog_params = cog_params or {}
+        self.system_limits = system_limits or {}
+        self.responder = Responder()
+        self.auto_objective = "Monitor and stabilize GPU thermal state."
+
+    def run_user_input(
+        self,
+        message: str,
+        *,
+        context: Optional[Dict[str, Any]] = None,
+        memory_snippets: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        return self._run_pipeline(
+            message,
+            context=context,
+            memory_snippets=memory_snippets,
+        )
 
     def run_cycle(
         self,
         objectives: List[str],
         context: Optional[Dict[str, Any]] = None,
         memory_snippets: Optional[List[str]] = None,
-        *,
-        reflection: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         text = " ".join(obj.strip() for obj in objectives if obj).strip()
         if not text:
             text = "Autonomous cycle request."
-        user_input = UserInput(raw_text=text, source=context.get("source", "system") if context else "system")
-        metadata = {
-            "objectives": objectives,
-            "context": context or {},
-        }
-        agent_output, response = self._execute_cycle(
-            user_input,
-            context=context,
-            memory_snippets=memory_snippets,
-            metadata=metadata,
-        )
-        if reflection:
-            response["reflection"] = reflection
-        else:
-            response["reflection"] = asdict(agent_output.preprocessor)
-        return response
-
-    def run_user_input(
-        self,
-        user_input: UserInput,
-        *,
-        context: Optional[Dict[str, Any]] = None,
-        memory_snippets: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> AgentCycleOutput:
-        agent_output, _ = self._execute_cycle(
-            user_input,
-            context=context,
-            memory_snippets=memory_snippets,
-            metadata=metadata or {"source": user_input.source},
-        )
-        return agent_output
-
-    def _execute_cycle(
-        self,
-        user_input: UserInput,
-        *,
-        context: Optional[Dict[str, Any]] = None,
-        memory_snippets: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> tuple[AgentCycleOutput, Dict[str, Any]]:
-        agent_output = self._run_pipeline(
-            user_input,
+        result = self._run_pipeline(
+            text,
             context=context,
             memory_snippets=memory_snippets,
         )
-        cycle_id, meta_summary = self._finalize_cycle(agent_output, metadata or {})
-        response = self._build_cycle_response(agent_output, cycle_id, meta_summary)
-        return agent_output, response
+        return result["record"]
 
     def _run_pipeline(
         self,
-        user_input: UserInput,
+        user_message: str,
         *,
         context: Optional[Dict[str, Any]] = None,
         memory_snippets: Optional[List[str]] = None,
-    ) -> AgentCycleOutput:
-        preproc = self.reflection_runner.run(user_input)
-        ctx = dict(context or {})
-        if ctx:
-            preproc.context.update(ctx)
-            mode_hint = ctx.get("mode")
-            if not mode_hint and ctx.get("query_type") == "knowledge":
-                mode_hint = "knowledge"
-            if not mode_hint and ctx.get("query_mode"):
-                mode_hint = "world_query"
-            if mode_hint in {"chat", "knowledge", "world_query", "world_control", "ambiguous"}:
-                preproc.mode = mode_hint
-            if "requires_tools" in ctx:
-                preproc.requires_tools = bool(ctx.get("requires_tools"))
-            if ctx.get("force_action"):
-                preproc.requires_tools = True
-        if memory_snippets:
-            preproc.memory_context.extend(memory_snippets)
-
+    ) -> Dict[str, Any]:
+        cycle_id = self.state_manager.cycle_index
+        reflection = self.reflection_runner.run(user_message)
+        if context:
+            reflection.context.update(context)
         current_state = self.state_manager.read()
-        plan = self.planner_runner.run(preproc, current_state)
-        if plan.needs_risk_check:
-            critic = self.critic_runner.run(plan)
-        else:
-            critic = CriticOutput(
-                risk="low",
-                issues=[],
-                suggestions=[],
-                confidence=1.0,
-                notes="Risk check skipped per planner request.",
-            )
-        decision = governor_decide(preproc, plan, critic)
-
-        tool_results: List[ToolResult] = []
-        if decision.verdict == "execute" and decision.final_tool_calls:
-            tool_results = self.tool_executor.execute_many(decision.final_tool_calls)
-
+        memory_context = self._collect_memory_context()
+        if memory_snippets:
+            memory_context.extend(memory_snippets)
+        plan = self.planner_runner.run(
+            reflection,
+            current_state,
+            memory_context=memory_context,
+        )
+        critic_output = self.critic_runner.run_plan(plan, mode=reflection.mode)
+        decision = arbitrate(
+            plan,
+            critic_output,
+            mode=reflection.mode,
+            context=reflection.context,
+        )
+        tool_result_objs = []
+        if decision.final_tool_calls:
+            tool_result_objs = self.tool_executor.execute_many(decision.final_tool_calls)
+        tool_results = [result.to_dict() for result in tool_result_objs]
         updated_state = self.state_manager.read()
-
-        responder_payload: Optional[Dict[str, Any]] = None
-        should_run_responder = (
-            self.responder_runner is not None
-            and user_input.source in {"chat", "api", "user"}
-        )
-        if should_run_responder:
-            allowed_modes = {"chat", "knowledge", "world_query", "world_control"}
-            responder_mode = preproc.mode if preproc.mode in allowed_modes else "chat"
-            responder_payload = self.responder_runner.run(
-                mode=responder_mode,
-                user_message=user_input.raw_text,
-                reflection=asdict(preproc),
-                plan=asdict(plan),
-                governor=asdict(decision),
-                tool_results=[asdict(result) for result in tool_results],
-                state=updated_state,
-            )
-
-        return AgentCycleOutput(
-            user=user_input,
-            preprocessor=preproc,
-            plan=plan,
-            critic=critic,
-            governor=decision,
-            tool_results=tool_results,
-            updated_state=updated_state,
-            responder=responder_payload,
-        )
-
-    def _finalize_cycle(
-        self,
-        agent_output: AgentCycleOutput,
-        metadata: Dict[str, Any],
-    ) -> tuple[int, Optional[Dict[str, Any]]]:
-        tool_results = [asdict(result) for result in agent_output.tool_results]
-        record = {
-            "user_input": asdict(agent_output.user),
-            "objectives": metadata.get("objectives", []),
-            "reflection": asdict(agent_output.preprocessor),
-            "actor": asdict(agent_output.plan),
-            "critic": asdict(agent_output.critic),
-            "governor": asdict(agent_output.governor),
+        cycle_record = {
+            "cycle": cycle_id,
+            "user_message": user_message,
+            "mode": reflection.mode,
+            "reflection": reflection.to_dict(),
+            "plan": plan.to_dict(),
+            "actor": plan.to_dict(),
+            "critic": critic_output.to_dict(),
+            "governor": decision.to_dict(),
             "tool_results": tool_results,
-            "state": agent_output.updated_state,
-            "metadata": metadata,
+            "state": updated_state,
         }
-        self.state_manager.log_cycle(record)
-
-        meta_summary = self._maybe_run_meta_layer()
-        if meta_summary is not None:
-            self.state_manager.update_last_cycle({"meta": meta_summary})
-
-        cycle_id = self.state_manager.cycle_index - 1
+        self.state_manager.log_cycle(cycle_record)
         snapshot = {
             "cycle": cycle_id,
-            "reflection": record["reflection"],
-            "actor": record["actor"],
-            "critic": record["critic"],
-            "governor": record["governor"],
+            "reflection": cycle_record["reflection"],
+            "plan": cycle_record["plan"],
+            "critic": cycle_record["critic"],
+            "governor": cycle_record["governor"],
             "tool_results": tool_results,
-            "state": agent_output.updated_state,
-            "meta": meta_summary,
+            "state": updated_state,
         }
         GLOBAL_STATE_STORE.save_latest(snapshot)
         GLOBAL_STATE_STORE.append_history(snapshot)
-
-        self._record_episode(
-            cycle_id=cycle_id,
-            agent_output=agent_output,
-            metadata=metadata,
+        self._record_episode(cycle_id, reflection, decision, tool_results)
+        final_text = self.responder.build(
+            mode=reflection.mode,
+            reflection=reflection,
+            plan=plan,
+            decision=decision,
+            tool_results=tool_results,
+            identity=self.identity_profile,
+            policy=self.policy_config,
+            original_message=user_message,
+            current_state=updated_state,
         )
-
-        return cycle_id, meta_summary
-
-    def _build_cycle_response(
-        self,
-        agent_output: AgentCycleOutput,
-        cycle_id: int,
-        meta_summary: Optional[Dict[str, Any]],
-    ) -> Dict[str, Any]:
         return {
+            "final_text": final_text,
             "cycle": cycle_id,
-            "reflection": asdict(agent_output.preprocessor),
-            "actor": asdict(agent_output.plan),
-            "critic": asdict(agent_output.critic),
-            "governor": asdict(agent_output.governor),
-            "tool_results": [asdict(result) for result in agent_output.tool_results],
-            "meta": meta_summary,
-            "state": agent_output.updated_state,
+            "mode": reflection.mode,
+            "tool_results": tool_results,
+            "record": cycle_record,
         }
 
-    def _maybe_run_meta_layer(self) -> Optional[Dict[str, Any]]:
-        if self.state_manager.cycle_index % self._meta_frequency != 0:
-            return None
-
-        history = self.state_manager.history()
-        recent_decisions = history[-self._meta_frequency :]
-        meta_actor_output = self.meta_actor_runner.run(
-            current_params=self.cog_params,
-            recent_decisions=recent_decisions,
-            meta_cycle=self._meta_cycle_index,
-            system_limits=self.system_limits,
-        )
-        meta_actor_payload = _serialize_meta_actor(meta_actor_output)
-        meta_critic_output = self.meta_critic_runner.run(meta_actor_payload, self.cog_params)
-        decision = evaluate_meta_cycle(meta_actor_output, meta_critic_output, self.cog_params)
-
-        if decision.decision == "apply":
-            self.cog_params = decision.updated_params
-            self._persist_cog_params()
-        if decision.decision in {"apply", "noop"}:
-            self._meta_cycle_index += 1
-
-        summary = {
-            "meta_actor": meta_actor_payload,
-            "meta_critic": asdict(meta_critic_output),
-            "meta_governor": asdict(decision),
-        }
-        return summary
+    def _collect_memory_context(self, limit: int = 5) -> List[str]:
+        exported = self.memory_manager.export()
+        snippets = [entry["content"] for entry in exported[-limit:]]
+        return snippets
 
     def _record_episode(
         self,
-        *,
         cycle_id: int,
-        agent_output: AgentCycleOutput,
-        metadata: Dict[str, Any],
+        reflection: ReflectionOutput,
+        decision: GovernorDecision,
+        tool_results: List[Dict[str, Any]],
     ) -> None:
         if not self.episodic_memory:
             return
-
-        objectives = metadata.get("objectives") or [agent_output.preprocessor.goal]
         actions = [
-            f"{call.tool_name}:{json.dumps(call.arguments, sort_keys=True)}"
-            for call in agent_output.governor.final_tool_calls
+            f"{call.name}:{json.dumps(call.arguments, sort_keys=True)}"
+            for call in decision.final_tool_calls
         ]
-        readings: Dict[str, Any] = {}
-        try:
-            readings = self.tool_executor.get_recent_readings()
-        except AttributeError:
-            readings = {}
-
+        readings = {
+            result.get("tool"): result.get("result")
+            for result in tool_results
+            if result.get("status") == "ok"
+        }
         episode = {
             "cycle": cycle_id,
-            "objectives": objectives,
-            "readings": readings,
+            "objectives": [reflection.goal],
             "actions": actions,
-            "outcome": agent_output.governor.verdict,
-            "rationale": agent_output.governor.notes,
-            "notes": agent_output.preprocessor.notes,
-            "tool_results": [asdict(result) for result in agent_output.tool_results],
+            "readings": readings,
+            "outcome": decision.verdict,
+            "rationale": decision.rationale,
+            "notes": reflection.reflection_notes,
+            "tool_results": tool_results,
         }
         try:
             self.episodic_memory.append_episode(episode)
         except OSError:
             LOGGER.warning("Failed to persist episode for cycle %s", cycle_id)
 
-    def _persist_cog_params(self) -> None:
-        try:
-            self._config_path.parent.mkdir(parents=True, exist_ok=True)
-            with self._config_path.open("w", encoding="utf-8") as handle:
-                json.dump(self.cog_params, handle, indent=2)
-        except OSError as exc:  # pragma: no cover - filesystem safeguard
-            LOGGER.warning("Failed to persist cog params: %s", exc)
-
-
-def _serialize_meta_actor(meta_actor_output: MetaActorOutput) -> Dict[str, Any]:
-    adjustments = {
-        name: {"delta": value.delta, "justification": value.justification}
-        for name, value in meta_actor_output.parameter_adjustments.items()
-    }
-    return {
-        "meta_thoughts": meta_actor_output.meta_thoughts,
-        "cognitive_strategy": meta_actor_output.cognitive_strategy,
-        "parameter_adjustments": adjustments,
-        "meta_improvements": meta_actor_output.meta_improvements,
-        "assumptions": meta_actor_output.assumptions,
-    }
-
-
-def load_json_config(path: Path, default: Dict[str, Any]) -> Dict[str, Any]:
-    if not path.exists():
-        return dict(default)
-    try:
-        return json.loads(path.read_text(encoding="utf-8") or "{}") or dict(default)
-    except json.JSONDecodeError:
-        LOGGER.warning("Invalid JSON in %s; using defaults", path)
-        return dict(default)
-
-
-app = FastAPI(title="Self-Reflective LLM Mind")
-app.state.supervisor = None
-app.state.command_interpreter = None
-app.state.reflection_runner = None
-app.state.state_manager = StateManager()
-app.state.memory_manager = MemoryManager()
-app.state.identity_profile = load_json_config(
-    IDENTITY_PATH,
-    {
-        **AGENT_IDENTITY,
-        "description": "Spectator is a local assistant focused on safe system monitoring and control.",
-        "capabilities": [],
-        "limitations": [],
-    },
-)
-app.state.policy_config = load_json_config(
-    POLICY_CONFIG_PATH,
-    {
-        "thermal_policy": {
-            "target_min": 50,
-            "target_max": 65,
-            "aggressiveness": 0.5,
-            "max_step_change": 10,
-        }
-    },
-)
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-app.state.episodic_memory = EpisodicMemory(EPISODE_LOG_PATH)
-app.state.tool_executor = ToolExecutor(
-    app.state.state_manager,
-    app.state.memory_manager,
-    tool_config_path=ROOT_CONFIG_DIR / "tools.yaml",
-)
-app.state.cog_params = load_json_config(COG_PARAMS_PATH, {"meta_frequency": 3, "debug_enabled": False})
-app.state.system_limits = load_json_config(SYSTEM_LIMITS_PATH, {})
-
-templates = Jinja2Templates(directory="app/ui/templates")
-app.mount("/static", StaticFiles(directory="app/ui/static"), name="static")
-
-
 def configure_supervisor(
     *,
     actor_client: LLMClient,
     critic_client: Optional[LLMClient] = None,
-    meta_actor_client: Optional[LLMClient] = None,
-    meta_critic_client: Optional[LLMClient] = None,
 ) -> None:
     """Initialise the global supervisor using provided LLM clients."""
 
     critic_client = critic_client or actor_client
-    meta_actor_client = meta_actor_client or actor_client
-    meta_critic_client = meta_critic_client or critic_client
 
-    reflection_runner = ReflectionRunner(actor_client)
+    reflection_runner = ReflectionRunner(actor_client, identity_profile=app.state.identity_profile)
     planner_runner = PlannerRunner(
         actor_client,
         identity=app.state.identity_profile,
@@ -472,23 +254,19 @@ def configure_supervisor(
         identity=app.state.identity_profile,
         policy=app.state.policy_config,
     )
-    responder_runner = ResponderRunner(actor_client, identity=app.state.identity_profile or AGENT_IDENTITY)
 
     supervisor = ReasoningSupervisor(
+        reflection_runner=reflection_runner,
         planner_runner=planner_runner,
         critic_runner=critic_runner,
-        reflection_runner=reflection_runner,
-        responder_runner=responder_runner,
-        meta_actor_runner=MetaActorRunner(meta_actor_client),
-        meta_critic_runner=MetaCriticRunner(meta_critic_client),
         state_manager=app.state.state_manager,
         memory_manager=app.state.memory_manager,
         tool_executor=app.state.tool_executor,
+        identity_profile=app.state.identity_profile,
+        policy_config=app.state.policy_config,
+        episodic_memory=app.state.episodic_memory,
         cog_params=app.state.cog_params,
         system_limits=app.state.system_limits,
-        policy_config=app.state.policy_config,
-        identity_profile=app.state.identity_profile,
-        episodic_memory=app.state.episodic_memory,
     )
     app.state.supervisor = supervisor
     app.state.command_interpreter = CommandInterpreter(actor_client)
@@ -542,7 +320,7 @@ def cycles_page(request: Request, supervisor: ReasoningSupervisor = Depends(get_
     state = supervisor.state_manager.read()
     history = supervisor.state_manager.history()
     gpu_temps = app.state.tool_executor._read_gpu_temps()
-    episodes = app.state.episodic_memory.tail(5)
+    episodes = app.state.episodic_memory.tail(5) if app.state.episodic_memory else []
     return templates.TemplateResponse(
         "cycles.html",
         {
@@ -556,10 +334,16 @@ def cycles_page(request: Request, supervisor: ReasoningSupervisor = Depends(get_
     )
 
 
-@app.post("/run-cycle", response_model=CycleResponse)
-def run_cycle(request: CycleRequest, supervisor: ReasoningSupervisor = Depends(get_supervisor)) -> CycleResponse:
-    result = supervisor.run_cycle(request.objectives, context=request.context, memory_snippets=request.memory)
-    return CycleResponse(**result)
+@app.post("/run-cycle")
+def run_cycle(
+    request: CycleRequest,
+    supervisor: ReasoningSupervisor = Depends(get_supervisor),
+) -> Dict[str, Any]:
+    return supervisor.run_cycle(
+        request.objectives,
+        context=request.context,
+        memory_snippets=request.memory,
+    )
 
 
 @app.post("/hx/run-cycle")
@@ -640,10 +424,8 @@ async def chat_api(
     if not message:
         raise HTTPException(400, "No chat message provided")
 
-    user_input = UserInput(raw_text=message or "", source="chat")
-    agent_output = supervisor.run_user_input(user_input)
-    responder_payload = agent_output.responder or {}
-    final_message = responder_payload.get("final_text") or "I processed your request."
+    agent_output = supervisor.run_user_input(message)
+    final_message = agent_output.get("final_text") or "I processed your request."
     return templates.TemplateResponse(
         "chat_message_agent.html",
         {"request": request, "message": final_message},
@@ -675,8 +457,6 @@ def _build_debug_snapshot(supervisor: ReasoningSupervisor) -> Dict[str, Any]:
     actor_snapshot = _sanitize_snapshot(last_cycle.get("actor", {}))
     critic_snapshot = _sanitize_snapshot(last_cycle.get("critic", {}))
     governor_snapshot = _sanitize_snapshot(last_cycle.get("governor", {}))
-    meta_snapshot = _sanitize_snapshot(last_cycle.get("meta")) if last_cycle.get("meta") is not None else None
-
     state_snapshot = _sanitize_snapshot(supervisor.state_manager.read())
     cog_params_with_flag = dict(supervisor.cog_params)
     cog_params_with_flag.setdefault("debug_enabled", False)
@@ -688,7 +468,6 @@ def _build_debug_snapshot(supervisor: ReasoningSupervisor) -> Dict[str, Any]:
         "actor": actor_snapshot,
         "critic": critic_snapshot,
         "governor": governor_snapshot,
-        "meta": meta_snapshot,
         "state": state_snapshot,
         "cog_params": cog_params_snapshot,
     }

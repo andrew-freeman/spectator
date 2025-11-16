@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Iterable, Optional, Protocol
 
-from app.core.schemas import CriticOutput, Plan, ToolCall
+from app.core.schemas import CriticOutput, PlannerPlan, ToolCall
 
 from .critic_prompt import build_critic_prompt
 
@@ -19,12 +19,23 @@ class SupportsGenerate(Protocol):
 class CriticRunner:
     """Prepare prompt, call model, and parse structured critic feedback."""
 
-    def __init__(self, client: SupportsGenerate, *, identity: Optional[Dict[str, Any]] = None, policy: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        client: SupportsGenerate,
+        *,
+        identity: Optional[Dict[str, Any]] = None,
+        policy: Optional[Dict[str, Any]] = None,
+    ):
         self._client = client
         self._identity = identity or {}
         self._policy = policy or {}
 
-    def run(self, plan: Plan, safety_policies: Optional[Iterable[str]] = None) -> CriticOutput:
+    def run_plan(
+        self,
+        plan: PlannerPlan,
+        mode: Optional[str] = None,
+        safety_policies: Optional[Iterable[str]] = None,
+    ) -> CriticOutput:
         plan_payload = _plan_to_payload(plan)
         prompt = build_critic_prompt(
             plan_payload,
@@ -59,8 +70,10 @@ class CriticRunner:
             if not isinstance(tc, dict):
                 continue
             tool_name = tc.get("tool_name") or tc.get("name") or ""
+            if not tool_name:
+                continue
             adjusted_tool_calls.append(
-                ToolCall(tool_name=tool_name, arguments=tc.get("arguments", {}) or {})
+                ToolCall(name=tool_name, arguments=tc.get("arguments", {}) or {})
             )
         confidence = float(payload.get("confidence", 0.0) or 0.0)
         notes = str(payload.get("notes", "")).strip()
@@ -76,12 +89,12 @@ class CriticRunner:
         )
 
 
-def _plan_to_payload(plan: Plan) -> Dict[str, Any]:
+def _plan_to_payload(plan: PlannerPlan) -> Dict[str, Any]:
     return {
         "analysis": plan.analysis,
         "steps": plan.steps,
         "tool_calls": [
-            {"tool_name": tc.tool_name, "arguments": tc.arguments}
+            {"tool_name": tc.name, "arguments": tc.arguments}
             for tc in plan.tool_calls
         ],
         "response_type": plan.response_type,

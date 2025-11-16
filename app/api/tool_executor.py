@@ -78,9 +78,9 @@ class ToolExecutor:
             return {"error": str(exc)}
 
     def execute(self, tool_call: ToolCall) -> ToolResult:
-        tool_name = getattr(tool_call, "tool_name", None)
+        tool_name = getattr(tool_call, "name", None) or getattr(tool_call, "tool_name", None)
         if not tool_name:
-            raise ValueError(f"Invalid tool call, missing tool_name: {tool_call}")
+            raise ValueError(f"Invalid tool call, missing tool name: {tool_call}")
 
         handler = getattr(self, f"_tool_{tool_name}", None)
         spec = self._tool_specs.get(tool_name)

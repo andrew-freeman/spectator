@@ -1,69 +1,65 @@
-"""Decision logic for the Spectator governor layer."""
+"""Decision logic that mediates between planner, critic, and tool executor."""
 from __future__ import annotations
 
-from app.core.schemas import CriticOutput, GovernorDecision, Plan, PreprocessorOutput
+from typing import Any, Dict, Optional
+
+from app.core.schemas import CriticOutput, GovernorDecision, PlannerPlan
 
 
-def decide(
-    preproc: PreprocessorOutput,
-    plan: Plan,
-    critic: CriticOutput,
+def arbitrate(
+    planner_plan: PlannerPlan,
+    critic_output: CriticOutput,
+    *,
+    mode: str,
+    context: Optional[Dict[str, Any]] = None,
 ) -> GovernorDecision:
     """Return a governor verdict for the provided cycle artifacts."""
 
-    if preproc.needs_clarification and preproc.clarification_question:
+    context = context or {}
+    metadata = {"mode": mode, "critic_risk": critic_output.risk}
+    metadata.update({k: v for k, v in context.items() if isinstance(k, str)})
+
+    final_tool_calls = critic_output.adjusted_tool_calls or planner_plan.tool_calls
+
+    if critic_output.risk in {"high", "unsafe"}:
+        rationale = critic_output.notes or "Critic marked the plan as unsafe."
+        if critic_output.issues:
+            rationale += " Issues: " + "; ".join(critic_output.issues)
         return GovernorDecision(
             verdict="reject",
-            final_response_mode="text",
-            ask_user=preproc.clarification_question,
-            notes="Clarification requested by preprocessor.",
-        )
-
-    if critic.risk in {"high", "unsafe"}:
-        issues = "; ".join(critic.issues) if critic.issues else critic.notes
-        return GovernorDecision(
-            verdict="reject",
-            final_response_mode="text",
-            notes="Plan rejected due to high/unsafe risk: " + (issues or "No details."),
-        )
-
-    if preproc.mode == "chat" and not preproc.requires_tools:
-        return GovernorDecision(
-            verdict="chat_only",
-            final_steps=plan.steps,
+            rationale=rationale,
             final_tool_calls=[],
-            final_response_mode=plan.response_type,
-            notes="Chat-only mode.",
+            final_response_type="text",
+            metadata=metadata,
         )
 
-    if preproc.mode == "knowledge" and not preproc.requires_tools:
+    if mode in {"chat", "knowledge"}:
         return GovernorDecision(
-            verdict="chat_only",
-            final_steps=plan.steps,
+            verdict="approve",
+            rationale="Responder-only mode; no tools required.",
             final_tool_calls=[],
-            final_response_mode=plan.response_type,
-            notes="Knowledge-only answer.",
+            final_response_type="text",
+            metadata=metadata,
         )
-
-    final_steps = critic.adjusted_steps or plan.steps
-    final_tool_calls = critic.adjusted_tool_calls or plan.tool_calls
 
     if not final_tool_calls:
+        rationale = "Plan lacked required tool calls for mode=" + mode
+        verdict = "request_more_data" if mode in {"world_query", "world_control"} else "approve"
         return GovernorDecision(
-            verdict="chat_only",
-            final_steps=final_steps,
+            verdict=verdict,
+            rationale=rationale,
             final_tool_calls=[],
-            final_response_mode=plan.response_type,
-            notes="No tool calls; treating as explanatory response.",
+            final_response_type=planner_plan.response_type,
+            metadata=metadata,
         )
 
     return GovernorDecision(
-        verdict="execute",
-        final_steps=final_steps,
+        verdict="approve",
+        rationale="Plan approved for execution.",
         final_tool_calls=final_tool_calls,
-        final_response_mode=plan.response_type,
-        notes="Plan approved for execution.",
+        final_response_type=planner_plan.response_type,
+        metadata=metadata,
     )
 
 
-__all__ = ["decide"]
+__all__ = ["arbitrate"]

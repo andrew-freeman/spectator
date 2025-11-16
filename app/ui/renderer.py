@@ -1,70 +1,69 @@
-"""Renderer utilities for translating agent outputs to human-readable responses."""
+"""Utility helpers for rendering chat responses outside the web UI."""
 from __future__ import annotations
 
-from typing import List
+from typing import Any, Dict, Sequence, Union
 
-from app.core.schemas import AgentCycleOutput, ToolResult
+from app.core.schemas import ToolResult
+
+ToolPayload = Union[ToolResult, Dict[str, Any]]
 
 
-def _format_tool_results(results: List[ToolResult]) -> str:
+def _format_tool_results(results: Sequence[ToolPayload]) -> str:
     if not results:
         return ""
     lines = []
     for result in results:
-        if result.status == "ok":
-            if result.result:
-                lines.append(f"- {result.tool}: {result.result}")
-            else:
-                lines.append(f"- {result.tool}: ok")
+        if isinstance(result, ToolResult):
+            payload = result.to_dict()
         else:
-            lines.append(f"- {result.tool}: ERROR: {result.error}")
+            payload = result
+        tool = payload.get("tool", "tool")
+        status = payload.get("status", "ok")
+        if status == "ok":
+            lines.append(f"- {tool}: {payload.get('result', {})}")
+        else:
+            lines.append(f"- {tool}: ERROR {payload.get('error', 'unknown error')}")
     return "\n".join(lines)
 
 
-def render_chat_response(output: AgentCycleOutput) -> str:
-    mode = output.preprocessor.mode
-    plan = output.plan
-    gov = output.governor
-    tools = output.tool_results
+def render_chat_response(record: Dict[str, Any]) -> str:
+    """Best-effort renderer compatible with the v2 pipeline records."""
 
-    if gov.ask_user:
-        return gov.ask_user
+    final_text = record.get("final_text")
+    if final_text:
+        return final_text
 
-    if mode == "chat":
-        if not plan.steps:
-            return (
-                "I am Spectator, a local, reflection-driven assistant monitoring this workstation "
-                "and carrying out safe, policy-aware actions. "
-                f"You said: '{output.user.raw_text}'."
-            )
-        return plan.steps[0]
+    reflection = record.get("reflection", {})
+    plan = record.get("plan", {})
+    governor = record.get("governor", {})
+    tool_results = record.get("tool_results", [])
 
-    if mode == "knowledge":
-        if plan.steps:
-            return plan.steps[0]
-        return "Here's my best answer: " + plan.analysis
+    mode = record.get("mode") or reflection.get("mode") or "chat"
+    goal = reflection.get("goal") or record.get("user_message", "")
+
+    if governor.get("verdict") == "reject":
+        return governor.get("rationale") or "I couldn't safely perform that request."
 
     if mode == "world_query":
-        if tools:
-            formatted = _format_tool_results(tools)
-            return f"Here is what I found based on the requested readings:\n{formatted}"
-        return "I attempted to read the system state, but no tool results were available."
+        summary = _format_tool_results(tool_results)
+        if summary:
+            return f"Here are the requested readings:\n{summary}"
+        return "I attempted to read the system state, but no tool data was returned."
 
     if mode == "world_control":
-        lines = []
-        if plan.analysis:
-            lines.append("Analysis: " + plan.analysis)
-        if plan.steps:
-            lines.append("Planned steps: " + "; ".join(plan.steps))
-        if tools:
-            lines.append(_format_tool_results(tools))
-        if not lines:
-            lines.append("Action completed.")
-        return "\n\n".join(lines)
+        summary = _format_tool_results(tool_results)
+        if summary:
+            return summary
+        return "I attempted the control action within policy limits."
 
-    if plan.steps:
-        return plan.steps[0]
-    return plan.analysis or f"I processed your request: '{output.user.raw_text}'."
+    if plan.get("analysis"):
+        return plan["analysis"]
+
+    steps = plan.get("steps") or []
+    if steps:
+        return steps[0]
+
+    return goal or "I'm ready for your next instruction."
 
 
 __all__ = ["render_chat_response"]
