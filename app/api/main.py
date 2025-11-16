@@ -11,7 +11,7 @@ from typing import Any, Dict, Iterable, List, Optional, Protocol
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from app.actor.actor_runner import ActorRunner
@@ -329,46 +329,37 @@ async def command(
 
 
 @app.post("/api/chat")
-async def chat_endpoint(
+async def chat_api(
     request: Request,
     message: Optional[str] = Form(None),
     supervisor: ReasoningSupervisor = Depends(get_supervisor),
     interpreter: CommandInterpreter = Depends(get_command_interpreter),
 ):
-    if message is None:
+    if not message:
         try:
             body = await request.json()
+            message = body.get("message")
         except Exception:  # pragma: no cover - malformed payload safeguard
-            body = {}
-        message = (body or {}).get("message")
+            message = None
 
     if not message:
-        raise HTTPException(400, "No chat message provided")
+        raise HTTPException(status_code=400, detail="No chat message provided")
 
-    LOGGER.info("Chat message received: %s", message)
-    structured = interpreter.interpret(message)
-    objectives = structured.get("objectives") or [message]
-    context = structured.get("context", {})
-    memory_snippets = structured.get("memory_snippets", [])
+    LOGGER.info(f"[CHAT] Received: {message}")
 
-    cycle_result = supervisor.run_cycle(objectives, context=context, memory_snippets=memory_snippets)
-    agent_message = "Running a reasoning cycle for: " + ", ".join(objectives)
-
-    user_template = templates.get_template("chat_message_user.html")
-    agent_template = templates.get_template("chat_message_agent.html")
-    cycle_template = templates.get_template("cycle_row.html")
-
-    content = "".join(
-        [
-            user_template.render({"request": request, "message": message}),
-            agent_template.render({"request": request, "message": agent_message}),
-            '<div class="mt-2">',
-            cycle_template.render({"request": request, "result": cycle_result}),
-            "</div>",
-        ]
+    context = interpreter.interpret(message)
+    cycle = supervisor.run_cycle(
+        objectives=context.get("objectives") or [message],
+        context=context.get("context", {}),
+        memory_snippets=context.get("memory_snippets", []),
     )
 
-    return HTMLResponse(content)
+    agent_message = cycle.get("actor", {}).get("analysis") or "No analysis available."
+
+    return templates.TemplateResponse(
+        "chat_message_agent.html",
+        {"request": request, "message": agent_message},
+    )
 
 
 def _is_sensitive_key(key: str) -> bool:
