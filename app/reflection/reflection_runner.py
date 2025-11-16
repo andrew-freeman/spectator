@@ -33,7 +33,7 @@ Example format:
 }
 
 USER MESSAGE:
-"""{message}"""
+{message}
 """.strip()
 
 

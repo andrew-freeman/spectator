@@ -102,7 +102,7 @@ class ReasoningSupervisor:
         decision = arbitrate(actor_output, critic_output, context=ctx)
 
         tool_results: List[Dict[str, Any]] = []
-        if decision.verdict not in {"request_more_data", "defer_to_critic"}:
+        if decision.verdict in {"approve", "trust_actor", "merge", "query_mode"}:
             tool_results = self.tool_executor.execute_many(decision.tool_calls)
 
         cycle_record = {
@@ -406,58 +406,37 @@ async def chat_api(
             {"request": request, "message": clarification, "reflection": reflection.get("reflection_notes")},
         )
 
-    structured = interpreter.interpret(message)
-    reflection_objectives = reflection.get("refined_objectives") or []
-    interpreter_objectives = structured.get("objectives") or []
-    objectives = reflection_objectives or interpreter_objectives or [message]
+    intent = (reflection.get("intent") or "").strip().lower()
+    reflection_context = dict(reflection.get("context") or {})
 
-    context_payload = dict(structured.get("context") or {})
-    reflection_context = reflection.get("context") or {}
-    context_payload.update(reflection_context)
-    intent = reflection.get("intent")
+    if intent == "query":
+        objectives = reflection.get("refined_objectives") or [f"Query: {message}"]
+        context_payload = dict(reflection_context)
+        context_payload["query_mode"] = True
+    elif intent in {"command", "objective"}:
+        structured = interpreter.interpret(message)
+        objectives = structured.get("objectives") or reflection.get("refined_objectives") or [message]
+        context_payload = {**reflection_context, **(structured.get("context") or {})}
+        if structured.get("force_action"):
+            context_payload["force_action"] = True
+    else:
+        objectives = reflection.get("refined_objectives") or [message]
+        context_payload = dict(reflection_context)
     if intent:
-        context_payload["intent"] = intent
-    if intent == "command":
-        context_payload["force_action"] = True
-    elif structured.get("force_action"):
-        context_payload["force_action"] = True
+        context_payload.setdefault("intent", intent)
 
     cycle = supervisor.run_cycle(
         objectives=objectives,
         context=context_payload,
-        memory_snippets=structured.get("memory_snippets", []),
+        memory_snippets=[],
         reflection=reflection,
     )
 
-    if intent == "query":
-        state_snapshot = supervisor.state_manager.read()
-        history = supervisor.state_manager.history()
-        verdict = cycle.get("governor", {}).get("verdict", "unknown")
-        plan = cycle.get("actor", {}).get("plan") or []
-        summary_parts = [
-            "Reflection classified this as an information query.",
-            f"System has recorded {len(history)} cycles so far.",
-            f"Latest governor verdict: {verdict}.",
-        ]
-        if plan:
-            summary_parts.append("Current plan: " + "; ".join(plan))
-        if state_snapshot:
-            summary_parts.append(
-                "Tracked state keys: " + ", ".join(sorted(state_snapshot.keys()))
-            )
-        agent_message = " ".join(summary_parts)
-    else:
-        actor_analysis = cycle.get("actor", {}).get("analysis") or "No analysis available."
-        governor_rationale = cycle.get("governor", {}).get("rationale") or "No governor rationale recorded."
-        agent_message = f"Actor analysis: {actor_analysis}\nGovernor decision: {governor_rationale}"
+    agent_message = cycle.get("actor", {}).get("analysis") or ""
 
     return templates.TemplateResponse(
         "chat_message_agent.html",
-        {
-            "request": request,
-            "message": agent_message,
-            "reflection": reflection.get("reflection_notes"),
-        },
+        {"request": request, "message": agent_message},
     )
 
 def _is_sensitive_key(key: str) -> bool:
@@ -535,11 +514,14 @@ async def auto_cycle_loop() -> None:
     async def _loop() -> None:
         while True:
             try:
-                supervisor.run_cycle(
+                result = supervisor.run_cycle(
                     objectives=["Monitor and stabilize GPU thermal state"],
                     context={},
                     memory_snippets=[],
                 )
+                verdict = result.get("governor", {}).get("verdict") if isinstance(result, dict) else None
+                if verdict == "query_mode":
+                    LOGGER.warning("Auto-cycle produced query_mode verdict; skipping result.")
             except Exception:  # pragma: no cover - runtime safeguard
                 LOGGER.exception("Automatic cycle failure")
             await asyncio.sleep(60)

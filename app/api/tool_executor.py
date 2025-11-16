@@ -35,7 +35,11 @@ class ToolExecutor:
     def execute(self, tool_call: ToolCall) -> Dict[str, Any]:
         handler = getattr(self, f"_tool_{tool_call.tool_name}", None)
         if handler is None:
-            return {"tool": tool_call.tool_name, "status": "unsupported"}
+            return {
+                "tool": tool_call.tool_name,
+                "status": "error",
+                "error": f"Unknown tool: {tool_call.tool_name}",
+            }
         return handler(tool_call.arguments)
 
     def execute_many(self, tool_calls: List[ToolCall]) -> List[Dict[str, Any]]:
