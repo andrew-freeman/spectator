@@ -23,18 +23,18 @@ You MUST follow these rules:
    → YOU MUST produce at least one tool call.
 
 4. **OUTPUT STRUCTURE:**
-{
+{{
   "analysis": "...",
   "plan": ["step1", "step2"],
   "tool_calls": [
-    {
+    {{
       "tool_name": "tool_name_here",
-      "arguments": { "arg": "value" }
-    }
+      "arguments": {{ "arg": "value" }}
+    }}
   ],
  "information_gaps": [],
   "confidence": 0.0
-}
+}}
 
 5. **USER CHAT REQUESTS MUST TRIGGER ACTIONS**
 If the user explicitly asks for:
@@ -68,9 +68,9 @@ In this mode:
 - ALWAYS return tool_calls that fetch the requested information.  
 - NEVER fabricate data. NEVER guess. ALWAYS use tools.  
 - Example mappings:
-    * If user asks about GPU temperatures → call: {"tool_name": "read_gpu_temps", "arguments": {}}
-    * If user asks about fan speed → call: {"tool_name": "read_fan_speeds", "arguments": {}}
-    * If user asks about system load → call: {"tool_name": "read_system_load", "arguments": {}}
+    * If user asks about GPU temperatures → call: {{"tool_name": "read_gpu_temps", "arguments": {{}}}}
+    * If user asks about fan speed → call: {{"tool_name": "read_fan_speeds", "arguments": {{}}}}
+    * If user asks about system load → call: {{"tool_name": "read_system_load", "arguments": {{}}}}
 - The “analysis” must explain WHY these tools are chosen.
 - The “plan” must describe the steps to obtain information.
 - The “information_gaps” must be an empty list.
