@@ -62,31 +62,6 @@ class ActorRunner:
         memory_snippets: Optional[List[str]] = None,
     ) -> ActorOutput:
         ctx = context or {}
-        if ctx.get("mode") == "query":
-            analysis_parts = [
-                "Query mode: summarising system state without executing tools.",
-            ]
-            if objectives:
-                analysis_parts.append(
-                    "Objectives: " + "; ".join(obj.strip() for obj in objectives if obj.strip())
-                )
-            extra_context = {k: v for k, v in ctx.items() if k != "mode"}
-            if extra_context:
-                context_fragments = ", ".join(f"{k}={v}" for k, v in extra_context.items())
-                analysis_parts.append(f"Context: {context_fragments}.")
-            if memory_snippets:
-                analysis_parts.append(
-                    "Memory snippets: " + "; ".join(snippet.strip() for snippet in memory_snippets if snippet)
-                )
-            analysis = " ".join(analysis_parts)
-            return ActorOutput(
-                analysis=analysis,
-                plan=[],
-                tool_calls=[],
-                information_gaps=[],
-                confidence=1.0,
-            )
-
         prompt = ACTOR_PROMPT
         raw = self._client.generate(prompt, stop=None)
         payload = _parse_json(raw)
