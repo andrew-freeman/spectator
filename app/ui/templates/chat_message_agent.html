@@ -1,5 +1,6 @@
-<div class="message assistant">
-  <pre class="whitespace-pre-wrap text-sm">
-      {{ message | tojson(indent=2) }}
-  </pre>
+<div class="flex justify-start">
+  <div class="max-w-xl bg-slate-200 text-slate-900 rounded-2xl rounded-bl-none px-4 py-3 shadow">
+    <p class="text-xs uppercase tracking-wide mb-1 text-slate-500">Spectator</p>
+    <p class="leading-relaxed" style="white-space: pre-wrap;">{{ message }}</p>
+  </div>
 </div>

@@ -100,6 +100,7 @@ class AgentCycleOutput:
     governor: GovernorDecision
     tool_results: List[ToolResult]
     updated_state: Dict[str, Any]
+    responder: Optional[Dict[str, Any]] = None
 
 
 __all__ = [

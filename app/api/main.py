@@ -23,7 +23,7 @@ from app.meta.meta_critic_runner import MetaCriticRunner, MetaCriticOutput
 from app.meta.meta_governor_logic import evaluate_meta_cycle
 from app.memory.episodic_memory import EpisodicMemory
 from app.reflection.reflection_runner import ReflectionRunner
-from app.ui.renderer import render_chat_response
+from app.response.responder_runner import ResponderRunner
 from app.state.state_store import GLOBAL_STATE_STORE
 
 from .command_interpreter import CommandInterpreter
@@ -43,6 +43,13 @@ POLICY_CONFIG_PATH = ROOT_CONFIG_DIR / "policies.json"
 IDENTITY_PATH = ROOT_CONFIG_DIR / "identity.json"
 EPISODE_LOG_PATH = DATA_DIR / "episodes" / "episodes.jsonl"
 SENSITIVE_FIELD_TOKENS = ("api_key", "apikey", "token", "secret", "password")
+
+AGENT_IDENTITY = {
+    "name": "Spectator",
+    "description": "Local autonomous reasoning agent on this machine operating within the user's workstation.",
+    "role": "Local autonomous reasoning agent",
+    "environment": "User's workstation",
+}
 
 
 class LLMClient(Protocol):
@@ -75,6 +82,7 @@ class ReasoningSupervisor:
         planner_runner: PlannerRunner,
         critic_runner: CriticRunner,
         reflection_runner: ReflectionRunner,
+        responder_runner: Optional[ResponderRunner],
         meta_actor_runner: MetaActorRunner,
         meta_critic_runner: MetaCriticRunner,
         state_manager: StateManager,
@@ -90,6 +98,7 @@ class ReasoningSupervisor:
         self.planner_runner = planner_runner
         self.critic_runner = critic_runner
         self.reflection_runner = reflection_runner
+        self.responder_runner = responder_runner
         self.meta_actor_runner = meta_actor_runner
         self.meta_critic_runner = meta_critic_runner
         self.state_manager = state_manager
@@ -210,6 +219,24 @@ class ReasoningSupervisor:
 
         updated_state = self.state_manager.read()
 
+        responder_payload: Optional[Dict[str, Any]] = None
+        should_run_responder = (
+            self.responder_runner is not None
+            and user_input.source in {"chat", "api", "user"}
+        )
+        if should_run_responder:
+            allowed_modes = {"chat", "knowledge", "world_query", "world_control"}
+            responder_mode = preproc.mode if preproc.mode in allowed_modes else "chat"
+            responder_payload = self.responder_runner.run(
+                mode=responder_mode,
+                user_message=user_input.raw_text,
+                reflection=asdict(preproc),
+                plan=asdict(plan),
+                governor=asdict(decision),
+                tool_results=[asdict(result) for result in tool_results],
+                state=updated_state,
+            )
+
         return AgentCycleOutput(
             user=user_input,
             preprocessor=preproc,
@@ -218,6 +245,7 @@ class ReasoningSupervisor:
             governor=decision,
             tool_results=tool_results,
             updated_state=updated_state,
+            responder=responder_payload,
         )
 
     def _finalize_cycle(
@@ -389,9 +417,7 @@ app.state.memory_manager = MemoryManager()
 app.state.identity_profile = load_json_config(
     IDENTITY_PATH,
     {
-        "name": "Spectator",
-        "role": "Local autonomous reasoning agent",
-        "environment": "User's workstation",
+        **AGENT_IDENTITY,
         "description": "Spectator is a local assistant focused on safe system monitoring and control.",
         "capabilities": [],
         "limitations": [],
@@ -446,11 +472,13 @@ def configure_supervisor(
         identity=app.state.identity_profile,
         policy=app.state.policy_config,
     )
+    responder_runner = ResponderRunner(actor_client, identity=app.state.identity_profile or AGENT_IDENTITY)
 
     supervisor = ReasoningSupervisor(
         planner_runner=planner_runner,
         critic_runner=critic_runner,
         reflection_runner=reflection_runner,
+        responder_runner=responder_runner,
         meta_actor_runner=MetaActorRunner(meta_actor_client),
         meta_critic_runner=MetaCriticRunner(meta_critic_client),
         state_manager=app.state.state_manager,
@@ -614,7 +642,8 @@ async def chat_api(
 
     user_input = UserInput(raw_text=message or "", source="chat")
     agent_output = supervisor.run_user_input(user_input)
-    final_message = render_chat_response(agent_output)
+    responder_payload = agent_output.responder or {}
+    final_message = responder_payload.get("final_text") or "I processed your request."
     return templates.TemplateResponse(
         "chat_message_agent.html",
         {"request": request, "message": final_message},
