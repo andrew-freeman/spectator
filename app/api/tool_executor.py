@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List
 
 from app.actor.actor_runner import ToolCall
@@ -16,6 +17,20 @@ class ToolExecutor:
     def __init__(self, state_manager: StateManager, memory_manager: MemoryManager):
         self._state_manager = state_manager
         self._memory_manager = memory_manager
+
+    def _read_gpu_temps(self) -> Dict[str, Any]:
+        import subprocess
+
+        try:
+            output = subprocess.check_output(
+                ["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader"],
+                encoding="utf-8",
+            )
+            temps = [int(x.strip()) for x in output.splitlines() if x.strip().isdigit()]
+            return {"gpu_temperatures": temps}
+        except Exception as exc:  # pragma: no cover - system dependency
+            LOGGER.exception("Failed to read GPU temperatures")
+            return {"error": str(exc)}
 
     def execute(self, tool_call: ToolCall) -> Dict[str, Any]:
         handler = getattr(self, f"_tool_{tool_call.tool_name}", None)
@@ -62,6 +77,14 @@ class ToolExecutor:
                 for entry in matches
             ],
         }
+
+    def _tool_read_gpu_temps(self, _: Dict[str, Any]) -> Dict[str, Any]:
+        result = self._read_gpu_temps()
+        status = "ok" if "gpu_temperatures" in result else "error"
+        return {"tool": "read_gpu_temps", "status": status, "result": result}
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 __all__ = ["ToolExecutor"]
