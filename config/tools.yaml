@@ -1,0 +1,19 @@
+tools:
+  read_gpu_temps:
+    kind: sensor
+    description: "Read GPU temperatures using nvidia-smi"
+    side_effect: none
+    max_frequency_hz: 2
+
+  set_fan_speed:
+    kind: actuator
+    description: "Set system fan speed in percent"
+    side_effect: moderate
+    params:
+      speed:
+        type: float
+        min: 0.0
+        max: 80.0
+    safety:
+      require_reason: true
+      require_recent_reading_s: 30

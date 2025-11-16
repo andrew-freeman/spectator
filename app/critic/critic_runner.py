@@ -40,15 +40,22 @@ class CriticOutput:
 class CriticRunner:
     """Prepare prompt, call model, and parse structured critic feedback."""
 
-    def __init__(self, client: SupportsGenerate):
+    def __init__(self, client: SupportsGenerate, *, identity: Optional[Dict[str, Any]] = None, policy: Optional[Dict[str, Any]] = None):
         self._client = client
+        self._identity = identity or {}
+        self._policy = policy or {}
 
     def run(
         self,
         actor_payload: Dict[str, Any],
         safety_policies: Optional[List[str]] = None,
     ) -> CriticOutput:
-        prompt = build_critic_prompt(actor_payload, safety_policies=safety_policies)
+        prompt = build_critic_prompt(
+            actor_payload,
+            safety_policies=safety_policies,
+            identity=self._identity,
+            policy=self._policy,
+        )
         raw = self._client.generate(prompt, stop=None)
         payload = _parse_json(raw)
         return CriticOutput.from_json(payload)

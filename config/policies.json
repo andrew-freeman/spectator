@@ -1,0 +1,8 @@
+{
+  "thermal_policy": {
+    "target_min": 50,
+    "target_max": 65,
+    "aggressiveness": 0.5,
+    "max_step_change": 10
+  }
+}

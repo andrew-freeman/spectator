@@ -17,17 +17,18 @@ TOOL_SCHEMAS: Dict[str, Dict] = {
     },
     "set_fan_speed": {
         "name": "set_fan_speed",
-        "description": "Adjust the active cooling fan speed as a float between 0 and 1.",
+        "description": "Adjust the active cooling fan speed in percent (0-80).",
         "parameters": {
             "type": "object",
             "properties": {
-                "value": {
+                "speed": {
                     "type": "number",
                     "minimum": 0.0,
-                    "maximum": 1.0,
-                }
+                    "maximum": 80.0,
+                },
+                "reason": {"type": "string"},
             },
-            "required": ["value"],
+            "required": ["speed", "reason"],
             "additionalProperties": False,
         },
     },
