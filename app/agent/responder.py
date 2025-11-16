@@ -1,15 +1,13 @@
-"""Deterministic responder for Spectator (V2)."""
-
+"""Deterministic responder for Spectator."""
 from __future__ import annotations
 
-import re
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Sequence
 
 from app.core.schemas import GovernorDecision, PlannerPlan, ReflectionOutput
 
 
 class Responder:
-    """Translate pipeline artifacts into natural-language replies."""
+    """Translate pipeline artifacts into natural language replies."""
 
     def build(
         self,
@@ -24,7 +22,7 @@ class Responder:
         original_message: str,
         current_state: Dict[str, Any],
     ) -> str:
-        # Hard safety / rejection guards
+        # High-level governor outcomes first.
         if decision.verdict == "reject":
             base = (
                 "I couldn't safely carry out that request because it would violate "
@@ -35,47 +33,48 @@ class Responder:
             return base + " Please adjust the request and try again."
 
         if decision.verdict == "request_more_data":
-            return "I need a bit more detail before I can carry that out."
+            return (
+                "I need a bit more detail before acting on that. Could you clarify "
+                "what information I should gather or which component to adjust?"
+            )
 
-        eff_mode = (mode or reflection.mode or "chat").lower()
+        # Fall back to reflection mode if not explicitly provided.
+        active_mode = mode or reflection.mode
 
-        if eff_mode == "chat":
+        if active_mode == "chat":
             return self._handle_chat(original_message, identity)
-
-        if eff_mode == "knowledge":
-            return self._handle_knowledge(plan, reflection, original_message)
-
-        if eff_mode == "world_query":
+        if active_mode == "knowledge":
+            return self._handle_knowledge(plan, reflection)
+        if active_mode == "world_query":
             return self._handle_world_query(tool_results)
-
-        if eff_mode == "world_control":
+        if active_mode == "world_control":
             return self._handle_world_control(tool_results, policy)
 
-        # Fallback: prefer planner analysis, then reflection goal
+        # Default catch-all.
         return plan.analysis or reflection.goal or "I'm ready for the next instruction."
 
-    # ------------------------------------------------------------------
-    # Chat mode
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------ #
+    # Mode-specific handlers
+    # ------------------------------------------------------------------ #
+
     def _handle_chat(self, user_message: str, identity: Dict[str, Any]) -> str:
         name = identity.get("name", "Spectator")
-        raw_desc = identity.get(
+        description = identity.get(
             "description",
             "a local autonomous reasoning agent monitoring your workstation",
         )
 
-        # Normalize description so we don't double-prefix it
-        desc = raw_desc
-        if desc.lower().startswith("i am "):
-            desc = desc[4:].strip()
-        if desc.lower().startswith("i'm "):
-            desc = desc[3:].strip()
-
         lower = user_message.lower()
 
-        if "who are you" in lower or "what are you" in lower or "what can you do" in lower:
+        # Avoid repeating the agent name if it is already in the description.
+        if name.lower() in description.lower():
+            base_identity = description
+        else:
+            base_identity = f"{name}, {description}"
+
+        if "who are you" in lower or "what are you" in lower:
             return (
-                f"I'm {name}, {desc}. I monitor GPUs, adjust fans within the thermal policy, "
+                f"I'm {base_identity}. I monitor GPUs, adjust fans within the thermal policy, "
                 "and keep all reasoning local on this machine."
             )
 
@@ -85,53 +84,23 @@ class Responder:
             )
 
         return (
-            f"I'm {name}, your local reasoning agent, {desc}. "
+            f"I'm {name}, your local reasoning agent. {description}. "
             "How can I assist you further?"
         )
 
-    # ------------------------------------------------------------------
-    # Knowledge mode (pure Q&A, including simple math)
-    # ------------------------------------------------------------------
-    def _handle_knowledge(
-        self,
-        plan: PlannerPlan,
-        reflection: ReflectionOutput,
-        original_message: str,
-    ) -> str:
-        special = self._special_case_response(original_message)
-        if special:
-            return special
+    def _handle_knowledge(self, plan: PlannerPlan, reflection: ReflectionOutput) -> str:
+        """Prefer the final planned step as the user-visible answer.
 
+        The planner is instructed to put the final human-readable answer as
+        the LAST entry in `steps`. We therefore prioritise that, and fall
+        back to analysis or the reflection goal if needed.
+        """
+        if plan.steps:
+            return str(plan.steps[-1]).strip()
         if plan.analysis:
             return plan.analysis
+        return reflection.goal
 
-        expr = self._extract_simple_expression(original_message)
-        if expr is not None:
-            try:
-                value = eval(expr, {"__builtins__": {}})
-                return f"{expr} = {value}"
-            except Exception:
-                pass
-
-        if plan.steps:
-            return plan.steps[-1]
-
-        return reflection.goal or "I wasn't able to derive a clear answer."
-
-    def _extract_simple_expression(self, text: str) -> str | None:
-        """
-        Extracts a simple 'a op b' expression like '2+2' or '3 * 7' from the text,
-        purely for very basic arithmetic questions.
-        """
-        # Very rough heuristic: look for something like "2+2", "3 * 4", etc.
-        match = re.search(r"(\d+\s*[\+\-\*/]\s*\d+)", text)
-        if match:
-            return match.group(1)
-        return None
-
-    # ------------------------------------------------------------------
-    # World query (live system state)
-    # ------------------------------------------------------------------
     def _handle_world_query(self, tool_results: Sequence[Dict[str, Any]]) -> str:
         summaries: List[str] = []
         for result in tool_results:
@@ -145,35 +114,39 @@ class Responder:
                 if temps:
                     temps_str = " and ".join(f"{t}°C" for t in temps)
                     summaries.append(f"The current GPU temperatures are {temps_str}.")
-
             elif tool == "read_system_load":
                 load = payload.get("load")
-                if load is not None:
-                    summaries.append(f"The current system load is {load}.")
-
+                if isinstance(load, dict):
+                    cpu = load.get("cpu")
+                    gpu = load.get("gpu")
+                    parts = []
+                    if cpu is not None:
+                        parts.append(f"CPU load {cpu}%")
+                    if gpu is not None:
+                        parts.append(f"GPU load {gpu}%")
+                    if parts:
+                        summaries.append("System load: " + ", ".join(parts) + ".")
             elif tool == "read_fan_speeds":
-                speeds = payload.get("fan_speeds")
-                if speeds:
-                    speeds_str = ", ".join(f"{s}%" for s in speeds)
-                    summaries.append(f"The current fan speeds are {speeds_str}.")
-
+                fans = payload.get("fan_speeds")
+                if isinstance(fans, dict):
+                    fan_parts = [f"{name}: {rpm} RPM" for name, rpm in fans.items()]
+                    if fan_parts:
+                        summaries.append("Fan speeds – " + ", ".join(fan_parts) + ".")
             elif tool == "read_state":
                 summaries.append("I retrieved the latest state snapshot from the controller.")
+            elif tool == "read_sensors":
+                summaries.append("I fetched the cached sensor readings.")
 
         if summaries:
             return " ".join(summaries)
-
         return "I tried to read the system state, but didn't receive any useful data."
 
-    # ------------------------------------------------------------------
-    # World control (actions on the environment)
-    # ------------------------------------------------------------------
     def _handle_world_control(
         self,
         tool_results: Sequence[Dict[str, Any]],
         policy: Dict[str, Any],
     ) -> str:
-        temps_msg = None
+        temps_msg: str | None = None
         action_msgs: List[str] = []
 
         for result in tool_results:
@@ -184,22 +157,26 @@ class Responder:
             if tool == "read_gpu_temps" and status == "ok":
                 temps = payload.get("gpu_temps")
                 if temps:
-                    temps_msg = "Current GPU temperatures: " + ", ".join(f"{t}°C" for t in temps) + "."
+                    temps_msg = "Current GPU temperatures: " + ", ".join(
+                        f"{t}°C" for t in temps
+                    ) + "."
 
-            if tool == "set_fan_speed":
-                if status == "ok":
-                    speed = payload.get("fan_speed")
-                    reason = payload.get("reason")
-                    if speed is not None:
-                        msg = f"Set the fan speed to {int(speed)}% within the safety policy"
-                        if reason:
-                            msg += f" because {reason}."
-                        else:
-                            msg += "."
-                        action_msgs.append(msg)
-                else:
-                    error = result.get("error") or "an unknown error occurred"
-                    action_msgs.append(f"Attempted to set fan speed, but {error}.")
+            if tool == "set_fan_speed" and status == "ok":
+                speed = payload.get("fan_speed")
+                reason = payload.get("reason")
+                if speed is not None:
+                    msg = f"Set the fan speed to {speed:.0f}% within the safety policy"
+                    if reason:
+                        msg += f" because {reason}."
+                    else:
+                        msg += "."
+                    action_msgs.append(msg)
+
+            if tool == "noop_control":
+                # Explicitly surface that no control action was taken.
+                reason = payload.get("reason")
+                if reason:
+                    action_msgs.append(f"No control action taken ({reason}).")
 
         policy_note = " I remained within the thermal policy constraints."
 
@@ -208,16 +185,8 @@ class Responder:
 
         return (
             "I attempted to act on your request, but no control actions were performed."
-            " The policy may have prevented unsafe changes."
+            " The policy or safety checks may have prevented unsafe changes."
         )
-
-    def _special_case_response(self, message: str) -> Optional[str]:
-        lowered = message.lower()
-        if "nut" in lowered and "cup" in lowered and "counter" in lowered:
-            return "The nut is on the countertop."
-        if "mirror" in lowered:
-            return "If you looked into a mirror, you would see your reflection."
-        return None
 
 
 __all__ = ["Responder"]
