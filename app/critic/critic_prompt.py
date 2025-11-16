@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 
 def build_critic_prompt(
-    actor_output: Dict[str, Any],
+    plan_payload: Dict[str, Any],
     safety_policies: Optional[List[str]] = None,
     *,
     identity: Optional[Dict[str, Any]] = None,
@@ -33,19 +33,21 @@ def build_critic_prompt(
         ## Thermal policy guidance
         {json.dumps(policy or {}, indent=2, ensure_ascii=False)}
 
-        ## Actor submission
-        {json.dumps(actor_output, indent=2, ensure_ascii=False)}
+        ## Planner submission
+        {json.dumps(plan_payload, indent=2, ensure_ascii=False)}
 
         ## Safety policies
         {json.dumps(policies, indent=2, ensure_ascii=False)}
 
         ## Output JSON schema
         {{
-          "evaluation": "Short summary of alignment with objectives and policies",
-          "detected_issues": ["List specific problems or contradictions"],
-          "risk_level": "low | medium | high | unsafe",
+          "risk": "low | medium | high | unsafe",
+          "issues": ["List specific problems or contradictions"],
+          "suggestions": ["Optional actionable improvements"],
+          "adjusted_steps": ["Optional revised steps"],
+          "adjusted_tool_calls": [{{"name": "tool", "arguments": {{}}}}],
           "confidence": 0.0-1.0 number showing confidence in this review,
-          "recommendations": ["Optional actionable improvements"]
+          "notes": "Short natural-language summary"
         }}
 
         Rules:

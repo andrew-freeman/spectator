@@ -5,8 +5,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Iterable, List, Optional
 
-from app.actor.actor_runner import ActorOutput
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -126,25 +124,30 @@ def _format_escalation_message(
 def _summarize_actor(actor_output: Dict[str, Any]) -> str:
     if not actor_output:
         return ""
-    try:
-        actor = ActorOutput.from_json(actor_output)
-    except Exception:
-        return ""
+    analysis = str(actor_output.get("analysis", "")).strip()
+    steps = actor_output.get("plan") or actor_output.get("steps") or []
+    if isinstance(steps, str):
+        steps = [steps]
+    info_gaps = actor_output.get("information_gaps") or []
+    confidence = actor_output.get("confidence")
+
     parts: List[str] = []
-    analysis = actor.analysis.strip()
     if analysis:
         parts.append(f"Analysis: {analysis}.")
-    if actor.plan:
-        plan_text = "; ".join(step.strip() for step in actor.plan if step.strip())
+    if isinstance(steps, list):
+        plan_text = "; ".join(str(step).strip() for step in steps if str(step).strip())
         if plan_text:
             parts.append(f"Planned steps: {plan_text}.")
-    if actor.information_gaps:
-        gaps = ", ".join(gap.strip() for gap in actor.information_gaps if gap.strip())
+    if isinstance(info_gaps, list) and info_gaps:
+        gaps = ", ".join(str(gap).strip() for gap in info_gaps if str(gap).strip())
         if gaps:
             parts.append(f"Information gaps: {gaps}.")
-    if actor.confidence:
-        confidence_pct = max(0.0, min(actor.confidence * 100.0, 100.0))
-        parts.append(f"Confidence: {confidence_pct:.0f}%.")
+    try:
+        if confidence is not None:
+            confidence_pct = max(0.0, min(float(confidence) * 100.0, 100.0))
+            parts.append(f"Confidence: {confidence_pct:.0f}%.")
+    except (TypeError, ValueError):
+        pass
     return " ".join(parts)
 
 

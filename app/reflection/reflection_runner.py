@@ -1,11 +1,11 @@
 """Reflection runner responsible for pre-processing user intent."""
-
 from __future__ import annotations
 
 import json
-import re
-from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, Iterable, List, Optional, Protocol
+from dataclasses import asdict
+from typing import Any, Dict, Iterable, Optional, Protocol
+
+from app.core.schemas import PreprocessorOutput, UserInput
 
 
 class SupportsGenerate(Protocol):
@@ -15,77 +15,42 @@ class SupportsGenerate(Protocol):
         ...
 
 
-REFLECTION_PROMPT = (
-    """
-You are a careful reflection module that analyses a user message before any tools run.
-For the provided USER MESSAGE, respond strictly as a JSON object with the following keys:
-- intent: one of ["query", "command", "objective", "ambiguous"].
-- query_type: one of ["world", "knowledge"].
-- refined_objectives: array of concise objective strings (may be empty).
-- context: JSON object of contextual hints or structured slots (may be empty). Use "chat_mode": true when the user is
-  purely conversing.
-- needs_clarification: boolean.
-- reflection_notes: short natural-language explanation.
+REFLECTION_PROMPT = """
+You are a careful reflection module that analyses a USER MESSAGE before any tools run.
 
-IDENTITY PROFILE:
+IDENTITY CONTEXT:
 {identity_block}
+
+For the provided USER MESSAGE, respond STRICTLY as a JSON object with the following keys:
+- mode: one of ["chat", "knowledge", "world_query", "world_control", "ambiguous"].
+- goal: a concise restatement of what the user wants.
+- keywords: array of important terms (may be empty).
+- requires_tools: boolean indicating whether tools are needed to satisfy the request.
+- needs_clarification: boolean.
+- clarification_question: a short clarification question IF needs_clarification is true, else null.
+- memory_context: array of short strings summarising relevant past events (may be empty).
+- context: JSON object of contextual hints (may be empty). Use "chat_mode": true for pure conversation.
+- confidence: number in [0,1].
+- notes: short natural-language explanation.
+- Legacy compatibility: mention "intent" inside your notes when summarising the classification.
 
 Example:
 {{
-  "intent": "query",
-  "query_type": "world",
-  "refined_objectives": ["Retrieve GPU readings"],
-  "context": {{
-    "query_mode": true
-  }},
+  "mode": "world_query",
+  "goal": "Retrieve current GPU temperatures",
+  "keywords": ["gpu", "temperature", "nvidia-smi"],
+  "requires_tools": true,
   "needs_clarification": false,
-  "reflection_notes": "User is requesting information."
+  "clarification_question": null,
+  "memory_context": [],
+  "context": {{"query_mode": true}},
+  "confidence": 0.95,
+  "notes": "User explicitly asked for readings from nvidia-smi."
 }}
 
 USER MESSAGE:
 '''{message}'''
-"""
-).strip()
-
-
-@dataclass
-class ReflectionOutput:
-    intent: str = "ambiguous"
-    query_type: str = "knowledge"
-    refined_objectives: List[str] = field(default_factory=list)
-    context: Dict[str, Any] = field(default_factory=dict)
-    needs_clarification: bool = False
-    reflection_notes: str = ""
-
-    @classmethod
-    def from_payload(cls, payload: Dict[str, Any]) -> "ReflectionOutput":
-        intent = str(payload.get("intent", "ambiguous")).strip().lower() or "ambiguous"
-        if intent not in {"query", "command", "objective", "chat", "ambiguous"}:
-            intent = "ambiguous"
-        query_type = str(payload.get("query_type", "knowledge")).strip().lower() or "knowledge"
-        if query_type not in {"world", "knowledge"}:
-            query_type = "knowledge"
-        refined_objectives = [
-            str(item).strip()
-            for item in payload.get("refined_objectives", [])
-            if str(item).strip()
-        ]
-        context = payload.get("context") or {}
-        if not isinstance(context, dict):
-            context = {}
-        needs_clarification = bool(payload.get("needs_clarification", False))
-        reflection_notes = str(payload.get("reflection_notes", "")).strip()
-        return cls(
-            intent=intent,
-            query_type=query_type,
-            refined_objectives=refined_objectives,
-            context=context,
-            needs_clarification=needs_clarification,
-            reflection_notes=reflection_notes,
-        )
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+""".strip()
 
 
 class ReflectionRunner:
@@ -95,130 +60,74 @@ class ReflectionRunner:
         self._client = client
         self._identity_profile = identity_profile or {}
 
-    def run(self, message: str) -> Dict[str, Any]:
-        if self._is_simple_query(message):
-            output = ReflectionOutput(
-                intent="query",
-                refined_objectives=[],
-                context={"query_mode": True, "allowed_tool_kinds": ["sensor"]},
-                needs_clarification=False,
-                reflection_notes="Simple query detected; bypassing reflection model.",
-            )
-            self._assign_query_type(output, message)
-            return output.to_dict()
-
+    def run(self, user_input: UserInput | str) -> PreprocessorOutput | Dict[str, Any]:
+        expects_dataclass = isinstance(user_input, UserInput)
+        normalized_input = user_input if expects_dataclass else UserInput(raw_text=str(user_input))
         prompt = REFLECTION_PROMPT.format(
-            message=message,
+            message=normalized_input.raw_text,
             identity_block=json.dumps(self._identity_profile, indent=2),
         )
-        fallback = ReflectionOutput(
-            intent="ambiguous",
-            refined_objectives=[],
-            context={},
-            needs_clarification=False,
-            reflection_notes="Reflection fallback invoked.",
-        )
-
         try:
             raw = self._client.generate(prompt, stop=None)
-        except Exception:
-            self._assign_query_type(fallback, message)
-            return fallback.to_dict()
-
-        try:
             payload = json.loads(raw)
-            output = ReflectionOutput.from_payload(payload)
-            self._apply_intent_context(output)
-            self._assign_query_type(output, message)
-            return output.to_dict()
         except Exception:
-            self._assign_query_type(fallback, message)
-            return fallback.to_dict()
-
-    def _apply_intent_context(self, output: ReflectionOutput) -> None:
-        ctx = output.context
-        if output.intent == "chat":
-            ctx["chat_mode"] = True
-            ctx["allowed_tool_kinds"] = []
-        elif output.intent == "query":
-            ctx["query_mode"] = True
-            ctx["allowed_tool_kinds"] = ["sensor"]
-        elif output.intent == "command":
-            ctx["command_mode"] = True
-            ctx["allowed_tool_kinds"] = ["sensor", "actuator"]
-            ctx["force_action"] = True
-        elif output.intent == "objective":
-            ctx["goal_update"] = True
-
-    def _assign_query_type(self, output: ReflectionOutput, message: str) -> None:
-        query_type = self._determine_query_type(message)
-        output.query_type = query_type
-        ctx = output.context
-        if not isinstance(ctx, dict):
-            ctx = {}
-            output.context = ctx
-        ctx["query_type"] = query_type
-
-    def _determine_query_type(self, message: str) -> str:
-        text = (message or "").strip().lower()
-        if not text:
-            return "knowledge"
-        world_tokens = (
-            "temperature",
-            "temps",
-            "gpu",
-            "nvidia-smi",
-            "fan",
-            "rpm",
-            "load",
-            "usage",
-            "utilization",
-        )
-        if any(token in text for token in world_tokens):
-            return "world"
-        math_like = bool(re.search(r"\d+\s*[+\-*/]", message or ""))
-        identity_like = any(
-            phrase in text
-            for phrase in (
-                "who are you",
-                "what is your name",
-                "what is 2+2",
-                "define",
-                "explain",
+            fallback = PreprocessorOutput(
+                mode="ambiguous",
+                goal=normalized_input.raw_text.strip() or "No goal",
+                notes="Reflection fallback invoked; defaulting to ambiguous mode.",
             )
+            return fallback if expects_dataclass else asdict(fallback)
+
+        legacy_intent = payload.get("intent")
+        mode = str(payload.get("mode", "ambiguous")).strip().lower()
+        if not payload.get("mode") and legacy_intent:
+            intent_map = {
+                "chat": "chat",
+                "query": "world_query",
+                "command": "world_control",
+                "objective": "world_control",
+            }
+            mapped = intent_map.get(str(legacy_intent).lower().strip())
+            if mapped:
+                mode = mapped
+        if mode not in {"chat", "knowledge", "world_query", "world_control", "ambiguous"}:
+            mode = "ambiguous"
+
+        goal = str(payload.get("goal", normalized_input.raw_text)).strip() or normalized_input.raw_text
+        keywords = [str(k).strip() for k in payload.get("keywords", []) if str(k).strip()]
+        requires_tools = bool(payload.get("requires_tools", False))
+        needs_clarification = bool(payload.get("needs_clarification", False))
+        clarification_question = payload.get("clarification_question")
+        if clarification_question is not None:
+            clarification_question = str(clarification_question).strip() or None
+
+        memory_context = [
+            str(m).strip() for m in payload.get("memory_context", []) if str(m).strip()
+        ]
+        context = payload.get("context") or {}
+        if not isinstance(context, dict):
+            context = {}
+        if mode == "chat":
+            context.setdefault("chat_mode", True)
+        elif mode == "world_query":
+            context.setdefault("query_mode", True)
+
+        confidence = float(payload.get("confidence", 0.0) or 0.0)
+        notes = str(payload.get("notes", "")).strip()
+
+        output = PreprocessorOutput(
+            mode=mode,  # type: ignore[arg-type]
+            goal=goal,
+            keywords=keywords,
+            requires_tools=requires_tools,
+            needs_clarification=needs_clarification,
+            clarification_question=clarification_question,
+            memory_context=memory_context,
+            context=context,
+            confidence=confidence,
+            notes=notes,
         )
-        if math_like or identity_like:
-            return "knowledge"
-        return "knowledge"
-
-    def _is_simple_query(self, message: str) -> bool:
-        text = (message or "").strip()
-        if not text:
-            return False
-        if self._is_identity_question(text):
-            return False
-        return self._is_simple_math(text) or self._is_simple_natural_question(text)
-
-    def _is_simple_math(self, text: str) -> bool:
-        return bool(re.fullmatch(r"[0-9\s+\-*/^().=]+", text))
-
-    def _is_simple_natural_question(self, text: str) -> bool:
-        lowered = text.lower()
-        if len(lowered) > 60:
-            return False
-        if len(lowered.split()) > 12:
-            return False
-        question_words = ("who", "what", "where", "when", "why", "how")
-        return any(
-            lowered.startswith(word)
-            or lowered.startswith(f"{word} ")
-            or lowered.startswith(f"{word}'s")
-            for word in question_words
-        )
-
-    def _is_identity_question(self, text: str) -> bool:
-        lowered = text.lower()
-        return "who are you" in lowered or lowered.strip() in {"who r u", "who ru"}
+        return output if expects_dataclass else asdict(output)
 
 
-__all__ = ["ReflectionRunner", "ReflectionOutput"]
+__all__ = ["ReflectionRunner", "SupportsGenerate", "REFLECTION_PROMPT"]
