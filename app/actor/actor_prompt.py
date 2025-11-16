@@ -53,6 +53,13 @@ Never produce markdown fences.
 
 7. **TREAT USER INPUT AS AN OBJECTIVE WHEN APPROPRIATE**
 If the user gives a command, treat it as a PRIMARY objective.
+
+8. **QUERY MODE REQUIRES TOOL CALLS**
+If context.query_mode is true, ALWAYS produce tool_calls relevant to the question.
+Examples:
+- If user asks about GPU temperatures, call read_gpu_temps.
+- If user asks about fan speed, call read_fan_speed.
+- NEVER fabricate data. Always use tools.
 """
 
 __all__ = ["ACTOR_PROMPT"]

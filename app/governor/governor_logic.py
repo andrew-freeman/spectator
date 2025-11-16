@@ -32,15 +32,20 @@ def arbitrate(
 
     context = context or {}
 
+    if context.get("query_mode"):
+        return GovernorDecision(
+            verdict="query_mode",
+            rationale="Information request; executing only actor tool calls.",
+            plan=actor.plan,
+            tool_calls=actor.tool_calls,
+            metadata={},
+        )
+
     def _finalise(decision: GovernorDecision) -> GovernorDecision:
         if context.get("force_action") and decision.verdict in {"request_more_data", "defer_to_critic"}:
             decision.verdict = "approve"
             decision.plan = actor.plan
             decision.tool_calls = actor.tool_calls
-        if context.get("intent") == "query":
-            decision.verdict = "query_mode"
-            decision.tool_calls = []
-            decision.metadata = {**decision.metadata, "intent": "query"}
         return decision
 
     # Missing data guard.

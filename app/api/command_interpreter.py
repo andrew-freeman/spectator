@@ -44,13 +44,7 @@ class CommandInterpreter:
 
         mode = classify(message)
         if mode == "query":
-            return {
-                "objectives": [
-                    "Answer the user's question using current state only and DO NOT perform actions."
-                ],
-                "context": {"mode": "query"},
-                "memory_snippets": [],
-            }
+            return {"objectives": [], "context": {}, "memory_snippets": []}
 
         user_block = json.dumps(message, ensure_ascii=False)
         prompt = PROMPT_TEMPLATE.format(user_block=user_block)
