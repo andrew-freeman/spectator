@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-from app.actor.actor_runner import ToolCall
+from app.core.schemas import ToolCall, ToolResult
 
 from .memory_manager import MemoryManager
 from .state_manager import StateManager
@@ -77,7 +77,7 @@ class ToolExecutor:
             LOGGER.exception("Failed to read GPU temperatures")
             return {"error": str(exc)}
 
-    def execute(self, tool_call: ToolCall) -> Dict[str, Any]:
+    def execute(self, tool_call: ToolCall) -> ToolResult:
         handler = getattr(self, f"_tool_{tool_call.tool_name}", None)
         spec = self._tool_specs.get(tool_call.tool_name)
         if handler is None or spec is None:
@@ -88,12 +88,17 @@ class ToolExecutor:
         if error:
             return _error_payload(tool_call.tool_name, error)
 
-        result = handler(arguments)
-        self._last_call_time[tool_call.tool_name] = time.monotonic()
-        return result
+        try:
+            payload = handler(arguments)
+        except Exception as exc:  # pragma: no cover - defensive guard
+            LOGGER.exception("Tool %s failed", tool_call.tool_name)
+            return _error_payload(tool_call.tool_name, str(exc))
 
-    def execute_many(self, tool_calls: List[ToolCall]) -> List[Dict[str, Any]]:
-        results: List[Dict[str, Any]] = []
+        self._last_call_time[tool_call.tool_name] = time.monotonic()
+        return _to_tool_result(tool_call.tool_name, payload)
+
+    def execute_many(self, tool_calls: List[ToolCall]) -> List[ToolResult]:
+        results: List[ToolResult] = []
         for call in tool_calls:
             results.append(self.execute(call))
         return results
@@ -268,5 +273,31 @@ def _load_tool_specs(tool_config_path: Optional[Path]) -> Dict[str, Dict[str, An
     return copy.deepcopy(specs)
 
 
-def _error_payload(tool: str, message: str) -> Dict[str, Any]:
-    return {"tool": tool, "status": "error", "error": message}
+def _error_payload(tool: str, message: str) -> ToolResult:
+    return ToolResult(tool=tool, status="error", result={}, error=message)
+
+
+def _to_tool_result(default_tool: str, payload: Any) -> ToolResult:
+    if not isinstance(payload, dict):
+        return ToolResult(tool=default_tool, status="error", result={}, error="Invalid tool payload")
+
+    tool = str(payload.get("tool") or default_tool)
+    status = str(payload.get("status") or ("error" if payload.get("error") else "ok")).lower()
+    if status not in {"ok", "error"}:
+        status = "ok"
+
+    result_data = payload.get("result")
+    if result_data is None and status == "ok":
+        result_data = {
+            key: value
+            for key, value in payload.items()
+            if key not in {"tool", "status", "error"}
+        }
+    if not isinstance(result_data, dict):
+        result_data = {"value": result_data}
+
+    error_msg = payload.get("error") if status == "error" else None
+    if status == "error" and not error_msg:
+        error_msg = "Unknown tool error"
+
+    return ToolResult(tool=tool, status=status, result=result_data, error=error_msg)

@@ -1,180 +1,69 @@
-"""Deterministic arbitration logic for the base-layer governor."""
-
+"""Decision logic for the Spectator governor layer."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
-
-from app.actor.actor_runner import ActorOutput, ToolCall
-from app.critic.critic_runner import CriticOutput
-
-from .helper_functions import MergedPlan, merge_plans, summarise_disagreements
+from app.core.schemas import CriticOutput, GovernorDecision, Plan, PreprocessorOutput
 
 
-@dataclass
-class GovernorDecision:
-    """Structured result of the governor arbitration."""
-
-    verdict: str
-    rationale: str
-    plan: List[str] = field(default_factory=list)
-    tool_calls: List[ToolCall] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-def arbitrate(
-    actor: ActorOutput,
+def decide(
+    preproc: PreprocessorOutput,
+    plan: Plan,
     critic: CriticOutput,
-    *,
-    context: Optional[Dict[str, Any]] = None,
-    policy: Optional[Dict[str, Any]] = None,
-    system_state: Optional[Dict[str, Any]] = None,
 ) -> GovernorDecision:
-    """Deterministically decide how to proceed based on actor/critic outputs."""
+    """Return a governor verdict for the provided cycle artifacts."""
 
-    context = context or {}
-    knowledge_query = context.get("query_type") == "knowledge"
-
-    if context.get("chat_mode"):
+    if preproc.needs_clarification and preproc.clarification_question:
         return GovernorDecision(
-            verdict="chat_mode",
-            rationale="Chat mode conversation; skipping tool execution.",
-            plan=[],
-            tool_calls=[],
-            metadata={"notes": "Chat intent"},
+            verdict="reject",
+            final_response_mode="text",
+            ask_user=preproc.clarification_question,
+            notes="Clarification requested by preprocessor.",
         )
 
-    if context.get("query_mode"):
-        if _contains_actuator(actor.tool_calls):
-            return GovernorDecision(
-                verdict="reject_plan",
-                rationale="Actuators are not permitted while in query mode.",
-                plan=[],
-                tool_calls=[],
-                metadata={"mode": "query"},
-            )
+    if critic.risk in {"high", "unsafe"}:
+        issues = "; ".join(critic.issues) if critic.issues else critic.notes
         return GovernorDecision(
-            verdict="query_mode",
-            rationale="Information request; executing only actor tool calls.",
-            plan=actor.plan,
-            tool_calls=actor.tool_calls,
-            metadata={},
+            verdict="reject",
+            final_response_mode="text",
+            notes="Plan rejected due to high/unsafe risk: " + (issues or "No details."),
         )
 
-    policy_violation = _evaluate_policy_guardrails(
-        actor.tool_calls,
-        policy or {},
-        system_state or {},
-        context or {},
-    )
-    if policy_violation:
+    if preproc.mode == "chat" and not preproc.requires_tools:
         return GovernorDecision(
-            verdict="reject_plan",
-            rationale=policy_violation,
-            plan=[],
-            tool_calls=[],
-            metadata=summarise_disagreements(actor, critic),
+            verdict="chat_only",
+            final_steps=plan.steps,
+            final_tool_calls=[],
+            final_response_mode=plan.response_type,
+            notes="Chat-only mode.",
         )
 
-    def _finalise(decision: GovernorDecision) -> GovernorDecision:
-        if knowledge_query:
-            if decision.verdict in {"trust_actor", "approve"}:
-                decision.tool_calls = []
-            return decision
-        if context.get("force_action") and decision.verdict in {"request_more_data", "defer_to_critic"}:
-            decision.verdict = "approve"
-            decision.plan = actor.plan
-            decision.tool_calls = actor.tool_calls
-        return decision
-
-    # Missing data guard.
-    if not actor.plan or not actor.analysis:
-        return _finalise(
-            GovernorDecision(
-                verdict="request_more_data",
-                rationale="Actor response was incomplete; requesting more context.",
-                metadata=summarise_disagreements(actor, critic),
-            )
+    if preproc.mode == "knowledge" and not preproc.requires_tools:
+        return GovernorDecision(
+            verdict="chat_only",
+            final_steps=plan.steps,
+            final_tool_calls=[],
+            final_response_mode=plan.response_type,
+            notes="Knowledge-only answer.",
         )
 
-    risk = critic.risk_level.lower().strip()
+    final_steps = critic.adjusted_steps or plan.steps
+    final_tool_calls = critic.adjusted_tool_calls or plan.tool_calls
 
-    if risk == "unsafe" or risk == "high":
-        return _finalise(
-            GovernorDecision(
-                verdict="defer_to_critic",
-                rationale="Critic identified unsafe or high-risk behaviour.",
-                metadata=summarise_disagreements(actor, critic),
-            )
+    if not final_tool_calls:
+        return GovernorDecision(
+            verdict="chat_only",
+            final_steps=final_steps,
+            final_tool_calls=[],
+            final_response_mode=plan.response_type,
+            notes="No tool calls; treating as explanatory response.",
         )
 
-    if critic.confidence < 0.4:
-        return _finalise(
-            GovernorDecision(
-                verdict="trust_actor",
-                rationale="Critic confidence too low; defaulting to actor plan.",
-                plan=actor.plan,
-                tool_calls=actor.tool_calls,
-                metadata=summarise_disagreements(actor, critic),
-            )
-        )
-
-    if critic.detected_issues:
-        merged: MergedPlan = merge_plans(actor, critic)
-        return _finalise(
-            GovernorDecision(
-                verdict="merge",
-                rationale="Resolved partial mismatch by merging actor plan with critic feedback.",
-                plan=merged.steps,
-                tool_calls=merged.tool_calls or [],
-                metadata={**summarise_disagreements(actor, critic), "notes": merged.notes},
-            )
-        )
-
-    return _finalise(
-        GovernorDecision(
-            verdict="trust_actor",
-            rationale="Critic found no issues and maintained adequate confidence.",
-            plan=actor.plan,
-            tool_calls=actor.tool_calls,
-            metadata=summarise_disagreements(actor, critic),
-        )
+    return GovernorDecision(
+        verdict="execute",
+        final_steps=final_steps,
+        final_tool_calls=final_tool_calls,
+        final_response_mode=plan.response_type,
+        notes="Plan approved for execution.",
     )
 
 
-def _contains_actuator(tool_calls: List[ToolCall]) -> bool:
-    return any(call.tool_name == "set_fan_speed" for call in tool_calls)
-
-
-def _evaluate_policy_guardrails(
-    tool_calls: List[ToolCall],
-    policy: Dict[str, Any],
-    system_state: Dict[str, Any],
-    context: Dict[str, Any],
-) -> Optional[str]:
-    thermal_policy = policy.get("thermal_policy", {})
-    max_step = thermal_policy.get("max_step_change")
-    last_speed = float(system_state.get("fan_speed", 0.0) or 0.0)
-    allow_actuators = set(context.get("allowed_tool_kinds", []))
-    if allow_actuators and "actuator" not in allow_actuators and _contains_actuator(tool_calls):
-        return "Context forbids actuator usage, but set_fan_speed was proposed."
-
-    for call in tool_calls:
-        if call.tool_name != "set_fan_speed":
-            continue
-        try:
-            speed = float(call.arguments.get("speed"))
-        except (TypeError, ValueError):
-            return "set_fan_speed call missing numeric 'speed'."
-        if speed < 0 or speed > 80:
-            return "Proposed fan speed is outside the permitted 0-80% range."
-        if max_step is not None and abs(speed - last_speed) > float(max_step):
-            return (
-                f"Fan speed change of {abs(speed - last_speed):.1f}% exceeds"
-                f" the allowed step of {max_step}%"
-            )
-        last_speed = speed
-    return None
-
-
-__all__ = ["GovernorDecision", "arbitrate"]
+__all__ = ["decide"]
