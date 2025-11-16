@@ -236,9 +236,10 @@ def healthcheck() -> Dict[str, str]:
 def dashboard(request: Request, supervisor: ReasoningSupervisor = Depends(get_supervisor)):
     state = supervisor.state_manager.read()
     history = supervisor.state_manager.history()
+    gpu_temps = app.state.tool_executor._read_gpu_temps()
     return templates.TemplateResponse(
         "dashboard.html",
-        {"request": request, "state": state, "history": history},
+        {"request": request, "state": state, "history": history, "gpu_temps": gpu_temps},
     )
 
 
@@ -265,6 +266,31 @@ def hx_run_cycle(
 @app.get("/history")
 def get_history(supervisor: ReasoningSupervisor = Depends(get_supervisor)) -> Dict[str, Any]:
     return {"history": supervisor.state_manager.history()}
+
+
+@app.on_event("startup")
+async def auto_cycle_loop() -> None:
+    import asyncio
+
+    supervisor = app.state.supervisor
+
+    if not supervisor:
+        LOGGER.warning("Supervisor not configured at startup.")
+        return
+
+    async def _loop() -> None:
+        while True:
+            try:
+                supervisor.run_cycle(
+                    objectives=["Monitor and stabilize GPU thermal state"],
+                    context={},
+                    memory_snippets=[],
+                )
+            except Exception:  # pragma: no cover - runtime safeguard
+                LOGGER.exception("Automatic cycle failure")
+            await asyncio.sleep(60)
+
+    asyncio.create_task(_loop())
 
 
 __all__ = ["app", "configure_supervisor", "ReasoningSupervisor"]

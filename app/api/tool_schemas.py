@@ -81,6 +81,15 @@ TOOL_SCHEMAS: Dict[str, Dict] = {
             "additionalProperties": False,
         },
     },
+    "read_gpu_temps": {
+        "name": "read_gpu_temps",
+        "description": "Reads GPU temperatures using nvidia-smi.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
 }
 
 

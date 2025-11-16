@@ -35,13 +35,17 @@ def build_actor_prompt(
         ## Memory Snippets
         {memory_block}
 
+        You have access to the tool `read_gpu_temps` which returns real GPU
+        temperatures as reported by nvidia-smi. Use this to assess system
+        load, thermal conditions, and required fan adjustments.
+
         ## Output JSON schema
         {{
           "analysis": "short paragraphs explaining the situation",
           "plan": ["ordered plan steps"],
           "tool_calls": [
             {{
-              "tool_name": "read_sensors | set_fan_speed | read_state | update_state | append_memory | query_memory",
+              "tool_name": "read_sensors | set_fan_speed | read_state | update_state | append_memory | query_memory | read_gpu_temps",
               "arguments": {{"...": "tool specific arguments"}}
             }}
           ],
