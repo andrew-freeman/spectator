@@ -24,16 +24,16 @@ For the provided USER MESSAGE, respond strictly as a JSON object with the follow
 - reflection_notes: short natural-language explanation summarising your reasoning.
 
 Example format:
-{
+{{
   "intent": "command",
   "refined_objectives": ["Deploy fixes to API"],
-  "context": {"priority": "high"},
+  "context": {{"priority": "high"}},
   "needs_clarification": false,
   "reflection_notes": "User requested a deployment."
-}
+}}
 
 USER MESSAGE:
-{message}
+'''{message}'''
 """.strip()
 
 
