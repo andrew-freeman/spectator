@@ -5,7 +5,8 @@ import json
 import logging
 from typing import Any, Dict, Iterable, Optional, Protocol
 
-from app.core.schemas import CriticOutput, PlannerPlan
+from app.core.schemas import CriticReview, PlannerPlan
+from app.core.structured import generate_structured_object
 
 from .critic_prompt import CRITIC_PROMPT
 
@@ -25,42 +26,22 @@ class CriticRunner:
         self._identity = identity or {}
         self._policy = policy or {}
 
-    def run_plan(self, plan: PlannerPlan, *, mode: str) -> CriticOutput:
+    def run_plan(self, plan: PlannerPlan, *, mode: str) -> CriticReview:
         prompt = CRITIC_PROMPT.format(
-            plan=json.dumps(plan.to_dict(), indent=2, ensure_ascii=False),
+            plan=json.dumps(plan.model_dump(), indent=2, ensure_ascii=False),
             mode=mode,
             identity=json.dumps(self._identity, indent=2, ensure_ascii=False),
             policy=json.dumps(self._policy, indent=2, ensure_ascii=False),
         )
+
+        def _fallback(_: Exception | None = None) -> CriticReview:
+            return CriticReview(risk_level="low", confidence=0.0, detected_issues=[], notes="Critic fallback invoked.")
+
         try:
-            raw = self._client.generate(prompt, stop=None)
-            payload = self._parse_json(raw)
-            return self._build_output(payload)
+            return generate_structured_object(self._client, prompt, CriticReview, _fallback)
         except Exception as exc:
             LOGGER.warning("Critic fallback invoked: %s", exc)
-            return CriticOutput(risk_level="low", confidence=0.0, detected_issues=[], notes="Critic fallback invoked.")
-
-    def _parse_json(self, raw: str) -> Dict[str, Any]:
-        snippet = raw.strip()
-        first = snippet.find("{")
-        last = snippet.rfind("}")
-        if first != -1 and last != -1:
-            snippet = snippet[first : last + 1]
-        return json.loads(snippet)
-
-    def _build_output(self, payload: Dict[str, Any]) -> CriticOutput:
-        risk = str(payload.get("risk_level", "low")).strip().lower()
-        if risk not in {"low", "medium", "high", "unsafe"}:
-            risk = "low"
-        confidence = float(payload.get("confidence", 0.0) or 0.0)
-        detected = [str(item).strip() for item in payload.get("detected_issues", []) or [] if str(item).strip()]
-        notes = str(payload.get("notes", "")).strip()
-        return CriticOutput(
-            risk_level=risk,  # type: ignore[arg-type]
-            confidence=confidence,
-            detected_issues=detected,
-            notes=notes,
-        )
+            return CriticReview(risk_level="low", confidence=0.0, detected_issues=[], notes="Critic exception fallback.")
 
 
 __all__ = ["CriticRunner"]

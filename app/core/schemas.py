@@ -1,123 +1,86 @@
-"""Shared dataclasses used throughout the Spectator v2 pipeline."""
+"""Pydantic models used across the Spectator V3 pipeline."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal
+
+from pydantic import BaseModel, Field, field_validator
 
 Mode = Literal["chat", "knowledge", "world_query", "world_control"]
 
 
-@dataclass
-class ToolCall:
+class ToolCall(BaseModel):
     """Structured representation of a tool invocation."""
 
     name: str
-    arguments: Dict[str, Any] = field(default_factory=dict)
+    arguments: Dict[str, Any] = Field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {"name": self.name, "arguments": dict(self.arguments)}
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, value: str) -> str:
+        return value.strip()
 
 
-@dataclass
-class ToolResult:
+class ToolResult(BaseModel):
     """Result returned by the ToolExecutor for a ToolCall."""
 
     tool: str
     status: Literal["ok", "error"]
-    result: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        payload = {
-            "tool": self.tool,
-            "status": self.status,
-            "result": dict(self.result),
-        }
-        if self.error:
-            payload["error"] = self.error
-        return payload
+    result: Dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
 
 
-@dataclass
-class ReflectionOutput:
-    """Normalized intent classification emitted by the reflection layer."""
+class ReflectionOutput(BaseModel):
+    """Pure intent classification emitted by the reflection layer."""
 
     mode: Mode
     goal: str
-    context: Dict[str, Any]
-    needs_clarification: bool
-    reflection_notes: str
+    context: Dict[str, Any] = Field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "mode": self.mode,
-            "goal": self.goal,
-            "context": dict(self.context),
-            "needs_clarification": self.needs_clarification,
-            "reflection_notes": self.reflection_notes,
-        }
+    @field_validator("goal")
+    @classmethod
+    def _clean_goal(cls, value: str) -> str:
+        text = value.strip()
+        return text or "Engage user"
 
 
-@dataclass
-class PlannerPlan:
+class PlannerPlan(BaseModel):
     """Structured plan describing the steps and tools selected by the planner."""
 
     mode: Mode
     analysis: str
-    steps: List[str]
-    tool_calls: List[ToolCall]
-    response_type: Literal["text", "json"]
-    needs_risk_check: bool
-    confidence: float
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "mode": self.mode,
-            "analysis": self.analysis,
-            "steps": list(self.steps),
-            "tool_calls": [call.to_dict() for call in self.tool_calls],
-            "response_type": self.response_type,
-            "needs_risk_check": self.needs_risk_check,
-            "confidence": self.confidence,
-        }
+    steps: List[str] = Field(default_factory=list)
+    tool_calls: List[ToolCall] = Field(default_factory=list)
+    response_type: Literal["text", "json"] = "text"
+    needs_risk_check: bool = False
+    confidence: float = 0.0
 
 
-@dataclass
-class CriticOutput:
+class CriticReview(BaseModel):
     """Risk assessment returned by the critic."""
 
-    risk_level: Literal["low", "medium", "high", "unsafe"]
-    confidence: float
-    detected_issues: List[str]
-    notes: str
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "risk_level": self.risk_level,
-            "confidence": self.confidence,
-            "detected_issues": list(self.detected_issues),
-            "notes": self.notes,
-        }
+    risk_level: Literal["low", "medium", "high", "unsafe"] = "low"
+    confidence: float = 0.0
+    detected_issues: List[str] = Field(default_factory=list)
+    notes: str = ""
 
 
-@dataclass
-class GovernorDecision:
+class GovernorDecision(BaseModel):
     """Final arbitration outcome that dictates execution and response."""
 
     verdict: str
     rationale: str
-    final_tool_calls: List[ToolCall]
-    response_type: Literal["text", "json"]
-    metadata: Dict[str, Any]
+    final_tool_calls: List[ToolCall] = Field(default_factory=list)
+    response_type: Literal["text", "json"] = "text"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "verdict": self.verdict,
-            "rationale": self.rationale,
-            "final_tool_calls": [call.to_dict() for call in self.final_tool_calls],
-            "response_type": self.response_type,
-            "metadata": dict(self.metadata),
-        }
+
+class ResponderFrame(BaseModel):
+    """Final response artifact handed to the chat UI."""
+
+    final_text: str
+    short_summary: str
+    used_tools: List[str] = Field(default_factory=list)
+    mode: Mode
 
 
 __all__ = [
@@ -126,6 +89,7 @@ __all__ = [
     "ToolResult",
     "ReflectionOutput",
     "PlannerPlan",
-    "CriticOutput",
+    "CriticReview",
     "GovernorDecision",
+    "ResponderFrame",
 ]

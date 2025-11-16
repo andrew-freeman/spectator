@@ -17,9 +17,10 @@ class _DummyClient:
         return json.dumps(self._payload)
 
 
-def test_reflection_prompt_keeps_json_example():
+def test_reflection_prompt_lists_constraints():
     prompt = REFLECTION_PROMPT.format(message="test")
-    assert '"mode"' in prompt and '"goal"' in prompt
+    assert "Role: Spectator reflection classifier." in prompt
+    assert "Constraints:" in prompt
 
 
 def test_reflection_runner_parses_json_payload():
@@ -27,8 +28,6 @@ def test_reflection_runner_parses_json_payload():
         "mode": "knowledge",
         "goal": "Compute 2+2",
         "context": {},
-        "needs_clarification": False,
-        "reflection_notes": "Simple math",
     }
     client = _DummyClient(payload)
     runner = ReflectionRunner(client, identity_profile={"name": "Spectator"})

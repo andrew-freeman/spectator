@@ -14,7 +14,7 @@ def _format_tool_results(results: Sequence[ToolPayload]) -> str:
     lines = []
     for result in results:
         if isinstance(result, ToolResult):
-            payload = result.to_dict()
+            payload = result.model_dump()
         else:
             payload = result
         tool = payload.get("tool", "tool")

@@ -177,22 +177,31 @@ class ReasoningSupervisor:
         tool_result_objs: List[ToolResult] = []
         if decision.final_tool_calls:
             tool_result_objs = self.tool_executor.execute_many(decision.final_tool_calls)
-        tool_results = [
-            result.to_dict() if hasattr(result, "to_dict") else dict(result)
-            for result in tool_result_objs
-        ]
+        tool_results = [result.model_dump() for result in tool_result_objs]
         updated_state = self.state_manager.read()
+        responder_frame = self.responder.build(
+            mode=reflection.mode,
+            reflection=reflection,
+            plan=plan,
+            decision=decision,
+            tool_results=tool_results,
+            identity=self.identity_profile,
+            policy=self.policy_config,
+            original_message=user_message,
+            current_state=updated_state,
+        )
         cycle_record = {
             "cycle": cycle_id,
             "user_message": user_message,
             "mode": reflection.mode,
-            "reflection": reflection.to_dict(),
-            "plan": plan.to_dict(),
-            "actor": plan.to_dict(),
-            "critic": critic_output.to_dict(),
-            "governor": decision.to_dict(),
+            "reflection": reflection.model_dump(),
+            "plan": plan.model_dump(),
+            "actor": plan.model_dump(),
+            "critic": critic_output.model_dump(),
+            "governor": decision.model_dump(),
             "tool_results": tool_results,
             "state": updated_state,
+            "responder": responder_frame.model_dump(),
         }
         self.state_manager.log_cycle(cycle_record)
         snapshot = {
@@ -207,26 +216,17 @@ class ReasoningSupervisor:
         GLOBAL_STATE_STORE.save_latest(snapshot)
         GLOBAL_STATE_STORE.append_history(snapshot)
         self._record_episode(cycle_id, reflection, decision, tool_results)
-        final_text = self.responder.build(
-            mode=reflection.mode,
-            reflection=reflection,
-            plan=plan,
-            decision=decision,
-            tool_results=tool_results,
-            identity=self.identity_profile,
-            policy=self.policy_config,
-            original_message=user_message,
-            current_state=updated_state,
-        )
+        final_text = responder_frame.final_text
         return {
             "final_text": final_text,
             "cycle": cycle_id,
             "mode": reflection.mode,
             "tool_results": tool_results,
-            "governor": decision.to_dict(),
-            "plan": plan.to_dict(),
-            "critic": critic_output.to_dict(),
-            "reflection": reflection.to_dict(),
+            "governor": decision.model_dump(),
+            "plan": plan.model_dump(),
+            "critic": critic_output.model_dump(),
+            "reflection": reflection.model_dump(),
+            "responder": responder_frame.model_dump(),
             "record": cycle_record,
         }
 
@@ -265,7 +265,7 @@ class ReasoningSupervisor:
             "readings": readings,
             "outcome": decision.verdict,
             "rationale": decision.rationale,
-            "notes": reflection.reflection_notes,
+            "notes": reflection.context.get("notes", ""),
             "tool_results": tool_results,
         }
         try:
@@ -317,7 +317,12 @@ def configure_supervisor(
         system_limits=system_limits,
     )
     reflection_runner = ReflectionRunner(actor_client, identity_profile=identity_profile)
-    planner_runner = PlannerRunner(actor_client, identity=identity_profile, policy=policy_config)
+    planner_runner = PlannerRunner(
+        actor_client,
+        identity=identity_profile,
+        policy=policy_config,
+        tool_registry=tool_executor.registry,
+    )
     critic_runner = CriticRunner(critic_client, identity=identity_profile, policy=policy_config)
 
     supervisor = ReasoningSupervisor(
@@ -533,6 +538,7 @@ def _build_debug_snapshot(supervisor: ReasoningSupervisor) -> Dict[str, Any]:
     actor_snapshot = _sanitize_snapshot(last_cycle.get("actor", {}))
     critic_snapshot = _sanitize_snapshot(last_cycle.get("critic", {}))
     governor_snapshot = _sanitize_snapshot(last_cycle.get("governor", {}))
+    responder_snapshot = _sanitize_snapshot(last_cycle.get("responder", {}))
     state_snapshot = _sanitize_snapshot(supervisor.state_manager.read())
     cog_params_with_flag = dict(supervisor.cog_params)
     cog_params_with_flag.setdefault("debug_enabled", False)
@@ -544,6 +550,7 @@ def _build_debug_snapshot(supervisor: ReasoningSupervisor) -> Dict[str, Any]:
         "actor": actor_snapshot,
         "critic": critic_snapshot,
         "governor": governor_snapshot,
+        "responder": responder_snapshot,
         "state": state_snapshot,
         "cog_params": cog_params_snapshot,
     }
