@@ -30,6 +30,7 @@ logging.basicConfig(level=logging.INFO)
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 COG_PARAMS_PATH = CONFIG_DIR / "cog_params.json"
 SYSTEM_LIMITS_PATH = CONFIG_DIR / "system_limits.json"
+SENSITIVE_FIELD_TOKENS = ("api_key", "apikey", "token", "secret", "password")
 
 
 class LLMClient(Protocol):
@@ -107,6 +108,7 @@ class ReasoningSupervisor:
         self.state_manager.log_cycle(cycle_record)
 
         meta_summary = self._maybe_run_meta_layer()
+        self.state_manager.update_last_cycle({"meta": meta_summary})
 
         response = {
             "cycle": self.state_manager.cycle_index - 1,
@@ -186,7 +188,7 @@ app.state.supervisor = None
 app.state.state_manager = StateManager()
 app.state.memory_manager = MemoryManager()
 app.state.tool_executor = ToolExecutor(app.state.state_manager, app.state.memory_manager)
-app.state.cog_params = load_json_config(COG_PARAMS_PATH, {"meta_frequency": 3})
+app.state.cog_params = load_json_config(COG_PARAMS_PATH, {"meta_frequency": 3, "debug_enabled": False})
 app.state.system_limits = load_json_config(SYSTEM_LIMITS_PATH, {})
 
 templates = Jinja2Templates(directory="app/ui/templates")
@@ -266,6 +268,50 @@ def hx_run_cycle(
 @app.get("/history")
 def get_history(supervisor: ReasoningSupervisor = Depends(get_supervisor)) -> Dict[str, Any]:
     return {"history": supervisor.state_manager.history()}
+
+
+def _is_sensitive_key(key: str) -> bool:
+    lowered = key.lower()
+    return any(token in lowered for token in SENSITIVE_FIELD_TOKENS)
+
+
+def _sanitize_snapshot(data: Any) -> Any:
+    if isinstance(data, dict):
+        sanitized: Dict[str, Any] = {}
+        for key, value in data.items():
+            if _is_sensitive_key(key):
+                continue
+            sanitized[key] = _sanitize_snapshot(value)
+        return sanitized
+    if isinstance(data, list):
+        return [_sanitize_snapshot(item) for item in data]
+    return data
+
+
+@app.get("/debug-system")
+def debug_system(supervisor: ReasoningSupervisor = Depends(get_supervisor)) -> Dict[str, Any]:
+    history = supervisor.state_manager.history()
+    last_cycle = history[-1] if history else {}
+
+    actor_snapshot = _sanitize_snapshot(last_cycle.get("actor", {}))
+    critic_snapshot = _sanitize_snapshot(last_cycle.get("critic", {}))
+    governor_snapshot = _sanitize_snapshot(last_cycle.get("governor", {}))
+    meta_snapshot = _sanitize_snapshot(last_cycle.get("meta")) if last_cycle.get("meta") is not None else None
+
+    state_snapshot = _sanitize_snapshot(supervisor.state_manager.read())
+    cog_params_with_flag = dict(supervisor.cog_params)
+    cog_params_with_flag.setdefault("debug_enabled", False)
+    cog_params_snapshot = _sanitize_snapshot(cog_params_with_flag)
+
+    return {
+        "cycle": supervisor.state_manager.cycle_index - 1,
+        "actor": actor_snapshot,
+        "critic": critic_snapshot,
+        "governor": governor_snapshot,
+        "meta": meta_snapshot,
+        "state": state_snapshot,
+        "cog_params": cog_params_snapshot,
+    }
 
 
 @app.on_event("startup")
