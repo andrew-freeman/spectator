@@ -31,6 +31,16 @@ COMMAND_VERBS = (
     "run",
     "execute",
 )
+CHAT_PHRASES = (
+    "who are you",
+    "what are you",
+    "your name",
+    "how are you",
+    "hello",
+    "hi",
+    "hey",
+    "nice to meet you",
+)
 
 
 class CommandInterpreter:
@@ -43,6 +53,9 @@ class CommandInterpreter:
         """Return structured objectives/context/memory for a user message."""
 
         mode = classify(message)
+        if mode == "chat":
+            return {"objectives": [], "context": {"chat_mode": True}, "memory_snippets": []}
+
         if mode == "query":
             return {"objectives": [], "context": {}, "memory_snippets": []}
 
@@ -61,11 +74,14 @@ class CommandInterpreter:
 
 
 def classify(message: str) -> str:
-    """Heuristic classifier that routes messages to query or command mode."""
+    """Heuristic classifier that routes messages to query, command, or chat mode."""
 
     text = (message or "").strip().lower()
     if not text:
         return "query"
+
+    if any(phrase in text for phrase in CHAT_PHRASES):
+        return "chat"
 
     for starter in QUERY_STARTERS:
         if text.startswith(starter):

@@ -43,7 +43,19 @@ class ToolExecutor:
         return handler(tool_call.arguments)
 
     def execute_many(self, tool_calls: List[ToolCall]) -> List[Dict[str, Any]]:
-        return [self.execute(call) for call in tool_calls]
+        results: List[Dict[str, Any]] = []
+        for call in tool_calls:
+            if not hasattr(self, f"_tool_{call.tool_name}"):
+                results.append(
+                    {
+                        "tool": call.tool_name,
+                        "status": "error",
+                        "error": f"Unknown tool: {call.tool_name}",
+                    }
+                )
+                continue
+            results.append(self.execute(call))
+        return results
 
     # Tool handlers -----------------------------------------------------
     def _tool_read_sensors(self, _: Dict[str, Any]) -> Dict[str, Any]:
@@ -110,6 +122,13 @@ class ToolExecutor:
             return {"stdout": output}
         except Exception as exc:  # pragma: no cover - defensive system call guard
             return {"error": str(exc)}
+
+    def _tool_who_are_you(self, _: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "tool": "who_are_you",
+            "status": "ok",
+            "result": "I am Spectator, your reflection-driven autonomous reasoning system.",
+        }
 
 
 LOGGER = logging.getLogger(__name__)
