@@ -41,7 +41,8 @@
       <input name="message" class="border p-2 w-full rounded" placeholder="Ask Spectator anything…" />
     </form>
     <div id="cycle-history" class="space-y-4 mt-4">
-                {% for result in history %}
+                {% for entry in history %}
+                  {% set result = entry %}
                   {% include "cycle_row.html" %}
                 {% endfor %}
     </div>
