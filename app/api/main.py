@@ -20,6 +20,7 @@ from app.governor.governor_logic import arbitrate
 from app.meta.meta_actor_runner import MetaActorRunner, MetaActorOutput
 from app.meta.meta_critic_runner import MetaCriticRunner, MetaCriticOutput
 from app.meta.meta_governor_logic import evaluate_meta_cycle
+from app.reflection.reflection_runner import ReflectionRunner
 
 from .command_interpreter import CommandInterpreter
 from .memory_manager import MemoryManager
@@ -48,6 +49,7 @@ class CycleRequest(BaseModel):
 
 class CycleResponse(BaseModel):
     cycle: int
+    reflection: Optional[Dict[str, Any]] = None
     actor: Dict[str, Any]
     critic: Dict[str, Any]
     governor: Dict[str, Any]
@@ -90,6 +92,8 @@ class ReasoningSupervisor:
         objectives: List[str],
         context: Optional[Dict[str, Any]] = None,
         memory_snippets: Optional[List[str]] = None,
+        *,
+        reflection: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         ctx = dict(context or {})
         actor_output = self.actor_runner.run(objectives, context=ctx, memory_snippets=memory_snippets)
@@ -103,6 +107,7 @@ class ReasoningSupervisor:
 
         cycle_record = {
             "objectives": objectives,
+            "reflection": reflection or {},
             "actor": actor_payload,
             "critic": asdict(critic_output),
             "governor": asdict(decision),
@@ -115,6 +120,7 @@ class ReasoningSupervisor:
 
         response = {
             "cycle": self.state_manager.cycle_index - 1,
+            "reflection": reflection or {},
             "actor": actor_payload,
             "critic": asdict(critic_output),
             "governor": asdict(decision),
@@ -189,6 +195,7 @@ def load_json_config(path: Path, default: Dict[str, Any]) -> Dict[str, Any]:
 app = FastAPI(title="Self-Reflective LLM Mind")
 app.state.supervisor = None
 app.state.command_interpreter = None
+app.state.reflection_runner = None
 app.state.state_manager = StateManager()
 app.state.memory_manager = MemoryManager()
 app.state.tool_executor = ToolExecutor(app.state.state_manager, app.state.memory_manager)
@@ -225,6 +232,7 @@ def configure_supervisor(
     )
     app.state.supervisor = supervisor
     app.state.command_interpreter = CommandInterpreter(actor_client)
+    app.state.reflection_runner = ReflectionRunner(actor_client)
 
 
 def get_supervisor() -> ReasoningSupervisor:
@@ -239,6 +247,13 @@ def get_command_interpreter() -> CommandInterpreter:
     if interpreter is None:
         raise HTTPException(status_code=503, detail="Command interpreter not configured.")
     return interpreter
+
+
+def get_reflection_runner() -> ReflectionRunner:
+    runner: Optional[ReflectionRunner] = getattr(app.state, "reflection_runner", None)
+    if runner is None:
+        raise HTTPException(status_code=503, detail="Reflection runner not configured.")
+    return runner
 
 
 @app.get("/health")
@@ -346,6 +361,7 @@ async def chat_api(
     request: Request,
     supervisor: ReasoningSupervisor = Depends(get_supervisor),
     interpreter: CommandInterpreter = Depends(get_command_interpreter),
+    reflection_runner: ReflectionRunner = Depends(get_reflection_runner),
 ):
     print("---- /api/chat CALLED ----")
     print("Headers:", request.headers)
@@ -380,22 +396,68 @@ async def chat_api(
 
     LOGGER.info(f"[CHAT] Received: {message}")
 
-    context = interpreter.interpret(message)
-    context["force_action"] = True
-    context_payload = dict(context.get("context", {}))
-    if context.get("force_action"):
+    reflection = reflection_runner.run(message)
+    LOGGER.info("Reflection output: %s", reflection)
+
+    if reflection.get("needs_clarification"):
+        clarification = reflection.get("reflection_notes") or "Could you clarify your request?"
+        return templates.TemplateResponse(
+            "chat_message_agent.html",
+            {"request": request, "message": clarification, "reflection": reflection.get("reflection_notes")},
+        )
+
+    structured = interpreter.interpret(message)
+    reflection_objectives = reflection.get("refined_objectives") or []
+    interpreter_objectives = structured.get("objectives") or []
+    objectives = reflection_objectives or interpreter_objectives or [message]
+
+    context_payload = dict(structured.get("context") or {})
+    reflection_context = reflection.get("context") or {}
+    context_payload.update(reflection_context)
+    intent = reflection.get("intent")
+    if intent:
+        context_payload["intent"] = intent
+    if intent == "command":
         context_payload["force_action"] = True
+    elif structured.get("force_action"):
+        context_payload["force_action"] = True
+
     cycle = supervisor.run_cycle(
-        objectives=context.get("objectives") or [message],
+        objectives=objectives,
         context=context_payload,
-        memory_snippets=context.get("memory_snippets", []),
+        memory_snippets=structured.get("memory_snippets", []),
+        reflection=reflection,
     )
 
-    agent_message = cycle.get("actor", {}).get("analysis") or "No analysis available."
+    if intent == "query":
+        state_snapshot = supervisor.state_manager.read()
+        history = supervisor.state_manager.history()
+        verdict = cycle.get("governor", {}).get("verdict", "unknown")
+        plan = cycle.get("actor", {}).get("plan") or []
+        summary_parts = [
+            "Reflection classified this as an information query.",
+            f"System has recorded {len(history)} cycles so far.",
+            f"Latest governor verdict: {verdict}.",
+        ]
+        if plan:
+            summary_parts.append("Current plan: " + "; ".join(plan))
+        if state_snapshot:
+            summary_parts.append(
+                "Tracked state keys: " + ", ".join(sorted(state_snapshot.keys()))
+            )
+        agent_message = " ".join(summary_parts)
+    else:
+        actor_analysis = cycle.get("actor", {}).get("analysis") or "No analysis available."
+        governor_rationale = cycle.get("governor", {}).get("rationale") or "No governor rationale recorded."
+        agent_message = f"Actor analysis: {actor_analysis}\nGovernor decision: {governor_rationale}"
 
     return templates.TemplateResponse(
         "chat_message_agent.html",
-        {"request": request, "message": agent_message},
+        {
+            "request": request,
+            "message": agent_message,
+            "reflection": reflection.get("reflection_notes"),
+        },
     )
 
 def _is_sensitive_key(key: str) -> bool:
@@ -420,6 +482,7 @@ def _build_debug_snapshot(supervisor: ReasoningSupervisor) -> Dict[str, Any]:
     history = supervisor.state_manager.history()
     last_cycle = history[-1] if history else {}
 
+    reflection_snapshot = _sanitize_snapshot(last_cycle.get("reflection", {})) if last_cycle else {}
     actor_snapshot = _sanitize_snapshot(last_cycle.get("actor", {}))
     critic_snapshot = _sanitize_snapshot(last_cycle.get("critic", {}))
     governor_snapshot = _sanitize_snapshot(last_cycle.get("governor", {}))
@@ -432,6 +495,7 @@ def _build_debug_snapshot(supervisor: ReasoningSupervisor) -> Dict[str, Any]:
 
     return {
         "cycle": supervisor.state_manager.cycle_index - 1,
+        "reflection": reflection_snapshot,
         "actor": actor_snapshot,
         "critic": critic_snapshot,
         "governor": governor_snapshot,
