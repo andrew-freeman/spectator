@@ -33,6 +33,7 @@ def arbitrate(
     """Deterministically decide how to proceed based on actor/critic outputs."""
 
     context = context or {}
+    knowledge_query = context.get("query_type") == "knowledge"
 
     if context.get("chat_mode"):
         return GovernorDecision(
@@ -76,6 +77,10 @@ def arbitrate(
         )
 
     def _finalise(decision: GovernorDecision) -> GovernorDecision:
+        if knowledge_query:
+            if decision.verdict in {"trust_actor", "approve"}:
+                decision.tool_calls = []
+            return decision
         if context.get("force_action") and decision.verdict in {"request_more_data", "defer_to_critic"}:
             decision.verdict = "approve"
             decision.plan = actor.plan
