@@ -9,19 +9,19 @@ RULES:
 2. NEVER narrate. Do not say "I will do X". Just fill fields.
 3. If tools are required, you MUST include at least one tool call.
 4. Structure:
-{
+{{
   "analysis": "...",
   "steps": ["step 1", "step 2"],
   "tool_calls": [
-    {
-      "tool_name": "tool_name_here",
-      "arguments": { "arg": "value" }
-    }
+    {{
+      "name": "tool_name_here",
+      "arguments": {{ "arg": "value" }}
+    }}
   ],
-  "response_type": "text",  // or "json"
+  "response_type": "text",
   "needs_risk_check": true,
   "confidence": 0.0
-}
+}}
 
 MODES:
 
@@ -44,7 +44,7 @@ MODES:
     - read_gpu_temps
     - read_system_load
     - read_fan_speeds
-  - response_type: "text" (for user-friendly answer) or "json" if structured is requested.
+  - response_type: "text" or "json" (if structured requested)
 
 - world_control:
   - For actions affecting the environment.
@@ -67,5 +67,3 @@ You will be given:
 
 Return exactly one JSON object with the schema described above.
 """.strip()
-
-__all__ = ["PLANNER_PROMPT"]
