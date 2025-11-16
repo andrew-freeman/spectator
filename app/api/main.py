@@ -308,6 +308,15 @@ async def command(
     supervisor: ReasoningSupervisor = Depends(get_supervisor),
     interpreter: CommandInterpreter = Depends(get_command_interpreter),
 ):
+    print("---- /command CALLED ----")
+    raw = await request.body()
+    print("RAW BODY:", raw)
+    try:
+        form_data = await request.form()
+        print("FORM DATA:", dict(form_data))
+    except:
+        print("FORM PARSE FAILED")
+
     if message is None:
         try:
             body = await request.json()
@@ -334,21 +343,33 @@ async def chat_api(
     supervisor: ReasoningSupervisor = Depends(get_supervisor),
     interpreter: CommandInterpreter = Depends(get_command_interpreter),
 ):
-    # Prefer form-encoded body (HTMX form POST)
-    message: Optional[str] = None
-    try:
-        form = await request.form()
-        message = form.get("message")
-    except Exception:
-        message = None
+    print("---- /api/chat CALLED ----")
+    print("Headers:", request.headers)
 
-    # Fallback: JSON payload with {"message": "..."}
+    raw_body = await request.body()
+    print("RAW BODY:", raw_body)
+
+    # ALWAYS define message first
+    message: Optional[str] = None
+
+    # Try form first
+    try:
+        form_data = await request.form()
+        print("FORM DATA:", dict(form_data))
+        message = form_data.get("message")
+    except Exception as e:
+        print("FORM PARSE ERROR:", e)
+
+    # Try JSON if form didn't contain message
     if not message:
         try:
             body = await request.json()
+            print("JSON BODY:", body)
             message = body.get("message")
         except Exception:
-            message = None
+            print("JSON PARSE FAILED")
+
+    print("FINAL MESSAGE VALUE:", message)
 
     if not message:
         raise HTTPException(status_code=400, detail="No chat message provided")
@@ -368,7 +389,6 @@ async def chat_api(
         "chat_message_agent.html",
         {"request": request, "message": agent_message},
     )
-
 
 def _is_sensitive_key(key: str) -> bool:
     lowered = key.lower()

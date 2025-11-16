@@ -25,24 +25,24 @@
     {% endfor %}
   </div>
   <div class="border-t border-slate-200 px-6 py-4 bg-slate-50">
-    <form
-      id="chat-form"
-      hx-post="/api/chat"
-      hx-target="#chat-history"
-      hx-swap="beforeend"
-      hx-on:after-request="this.reset()"
-      class="flex flex-row gap-2"
-    >
-      <input 
-        id="chat-input"
-        name="message"
-        type="text"
-        class="flex-grow border rounded p-2"
-        placeholder="Type a message..."
-        required
-      >
-      <button class="bg-blue-600 text-white px-4 py-2 rounded">Send</button>
-    </form>
+	<form
+	  id="chat-form"
+	  hx-post="/api/chat"
+	  hx-target="#chat-history"
+	  hx-swap="beforeend"
+	  hx-on:after-request="this.reset()"
+	  class="flex flex-row gap-2"
+	>
+	  <input
+		id="chat-input"
+		name="message"
+		type="text"
+		class="flex-grow border rounded p-2"
+		placeholder="Type a message..."
+		required
+	  >
+	  <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded">Send</button>
+	</form>
   </div>
 </section>
 
