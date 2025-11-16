@@ -17,33 +17,23 @@ class SupportsGenerate(Protocol):
 
 REFLECTION_PROMPT = (
     """
-You are Spectator's reflection analyst. Before any tools run, classify the
-incoming USER MESSAGE and set safe defaults.
+You are a careful reflection module that analyses a user message before any tools run.
+For the provided USER MESSAGE, respond strictly as a JSON object with the following keys:
+- intent: one of ["query", "command", "objective", "ambiguous"].
+- refined_objectives: array of concise objective strings (may be empty).
+- context: JSON object of contextual hints or structured slots (may be empty).
+- needs_clarification: boolean.
+- reflection_notes: short natural-language explanation.
 
-IDENTITY PROFILE:
-{identity_block}
-
-Return STRICT JSON with these keys:
-- intent: one of ["query", "command", "objective", "chat", "ambiguous"]
-- refined_objectives: array of concise objectives (may be empty)
-- context: JSON object (may be empty)
-- needs_clarification: boolean
-- reflection_notes: short explanation
-
-Classification rules:
-- Identity, personality, or "Who are you?" → intent="chat"
-- Casual conversation → intent="chat"
-- Requests for telemetry or status → intent="query"
-- Requests to change settings → intent="command"
-- Strategic or multi-cycle goals → intent="objective"
-
-Example output:
+Example:
 {{
-  "intent": "chat",
-  "refined_objectives": [],
-  "context": {{"chat_mode": true, "allowed_tool_kinds": []}},
+  "intent": "query",
+  "refined_objectives": ["Retrieve GPU readings"],
+  "context": {{
+    "query_mode": true
+  }},
   "needs_clarification": false,
-  "reflection_notes": "User is asking about the agent's identity."
+  "reflection_notes": "User is requesting information."
 }}
 
 USER MESSAGE:
@@ -107,7 +97,6 @@ class ReflectionRunner:
 
         prompt = REFLECTION_PROMPT.format(
             message=message,
-            identity_block=json.dumps(self._identity_profile, indent=2),
         )
         fallback = ReflectionOutput(
             intent="ambiguous",
