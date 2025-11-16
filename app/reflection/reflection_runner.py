@@ -126,4 +126,4 @@ class ReflectionRunner:
         return output
 
 
-__all__ = ["ReflectionRunner", "SupportsGenerate", "REFLECTION_PROMPT"]
+__all__ = ["ReflectionRunner", "SupportsGenerate", "REFLECTION_PROMPT", "ReflectionOutput"]

@@ -52,13 +52,17 @@ class ToolExecutor:
 
     def __init__(
         self,
+        *,
         state_manager: StateManager,
         memory_manager: MemoryManager,
-        *,
+        policy_config: Optional[Dict[str, Any]] = None,
+        system_limits: Optional[Dict[str, Any]] = None,
         tool_config_path: Optional[Path] = None,
     ):
         self._state_manager = state_manager
         self._memory_manager = memory_manager
+        self._policy_config = policy_config or {}
+        self._system_limits = system_limits or {}
         self._tool_specs = _load_tool_specs(tool_config_path)
         self._last_call_time: Dict[str, float] = {}
         self._recent_readings: Dict[str, Dict[str, Any]] = {}
@@ -77,8 +81,12 @@ class ToolExecutor:
             LOGGER.exception("Failed to read GPU temperatures")
             return {"error": str(exc)}
 
-    def execute(self, tool_call: ToolCall) -> ToolResult:
+    def execute(self, tool_call: ToolCall | Dict[str, Any]) -> ToolResult:
         tool_name = getattr(tool_call, "name", None) or getattr(tool_call, "tool_name", None)
+        arguments = getattr(tool_call, "arguments", None)
+        if tool_name is None and isinstance(tool_call, dict):
+            tool_name = tool_call.get("name") or tool_call.get("tool_name")
+            arguments = tool_call.get("arguments")
         if not tool_name:
             raise ValueError(f"Invalid tool call, missing tool name: {tool_call}")
 
@@ -87,7 +95,7 @@ class ToolExecutor:
         if handler is None or spec is None:
             return _error_payload(tool_name, f"Unknown tool: {tool_name}")
 
-        arguments = dict(tool_call.arguments or {})
+        arguments = dict(arguments or {})
         error = self._validate_tool_call(tool_name, arguments, spec)
         if error:
             return _error_payload(tool_name, error)
