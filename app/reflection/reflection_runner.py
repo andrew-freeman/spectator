@@ -20,17 +20,17 @@ For the provided USER MESSAGE, respond strictly as a JSON object with the follow
 - intent: one of ["query", "command", "objective", "ambiguous"].
 - refined_objectives: array of concise objective strings (may be empty).
 - context: JSON object of contextual hints or structured slots (may be empty).
-- needs_clarification: boolean indicating whether you must ask for clarification.
-- reflection_notes: short natural-language explanation summarising your reasoning.
+- needs_clarification: boolean.
+- reflection_notes: short natural-language explanation.
 
-Example format:
-{{
-  "intent": "command",
-  "refined_objectives": ["Deploy fixes to API"],
-  "context": {{"priority": "high"}},
+Example:
+{
+  "intent": "query",
+  "refined_objectives": ["Retrieve GPU readings"],
+  "context": {"query_mode": true},
   "needs_clarification": false,
-  "reflection_notes": "User requested a deployment."
-}}
+  "reflection_notes": "User is requesting information."
+}
 
 USER MESSAGE:
 '''{message}'''

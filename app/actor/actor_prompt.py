@@ -32,7 +32,7 @@ You MUST follow these rules:
       "arguments": { "arg": "value" }
     }
   ],
-  "information_gaps": [],
+ "information_gaps": [],
   "confidence": 0.0
 }
 
@@ -60,6 +60,22 @@ Examples:
 - If user asks about GPU temperatures, call read_gpu_temps.
 - If user asks about fan speed, call read_fan_speed.
 - NEVER fabricate data. Always use tools.
+
+### SPECIAL MODE: QUERY MODE ###
+If the context object includes "query_mode": true, the user is requesting information. 
+In this mode:
+
+- ALWAYS return tool_calls that fetch the requested information.  
+- NEVER fabricate data. NEVER guess. ALWAYS use tools.  
+- Example mappings:
+    * If user asks about GPU temperatures → call: {"tool_name": "read_gpu_temps", "arguments": {}}
+    * If user asks about fan speed → call: {"tool_name": "read_fan_speeds", "arguments": {}}
+    * If user asks about system load → call: {"tool_name": "read_system_load", "arguments": {}}
+- The “analysis” must explain WHY these tools are chosen.
+- The “plan” must describe the steps to obtain information.
+- The “information_gaps” must be an empty list.
+- The “confidence” must be between 0.8 and 1.0.
+- The actor MUST NOT propose control actions such as setting fan speeds while in query mode.
 """
 
 __all__ = ["ACTOR_PROMPT"]
