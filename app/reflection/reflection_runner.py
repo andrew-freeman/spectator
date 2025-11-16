@@ -14,8 +14,13 @@ class SupportsGenerate(Protocol):
         ...
 
 
-REFLECTION_PROMPT = """
-You are a careful reflection module that analyses the USER MESSAGE before any tools run.
+REFLECTION_PROMPT = (
+    """
+You are Spectator's reflection analyst. Before any tools run, classify the
+incoming USER MESSAGE and set safe defaults.
+
+IDENTITY PROFILE:
+{identity_block}
 
 Return STRICT JSON with these keys:
 - intent: one of ["query", "command", "objective", "chat", "ambiguous"]
@@ -25,24 +30,25 @@ Return STRICT JSON with these keys:
 - reflection_notes: short explanation
 
 Classification rules:
-- If user asks about identity, opinions, personality → intent="chat"
-- If user engages in casual conversation → intent="chat"
-- If user asks for system information or readings → intent="query"
-- If user asks to change system state or apply settings → intent="command"
-- If user sets a high-level goal → intent="objective"
+- Identity, personality, or "Who are you?" → intent="chat"
+- Casual conversation → intent="chat"
+- Requests for telemetry or status → intent="query"
+- Requests to change settings → intent="command"
+- Strategic or multi-cycle goals → intent="objective"
 
 Example output:
 {{
   "intent": "chat",
   "refined_objectives": [],
-  "context": {{"chat_mode": true}},
+  "context": {{"chat_mode": true, "allowed_tool_kinds": []}},
   "needs_clarification": false,
   "reflection_notes": "User is asking about the agent's identity."
 }}
 
 USER MESSAGE:
 '''{message}'''
-""".strip()
+"""
+).strip()
 
 
 @dataclass
@@ -83,11 +89,15 @@ class ReflectionOutput:
 class ReflectionRunner:
     """Generate a structured reflection summary prior to full reasoning."""
 
-    def __init__(self, client: SupportsGenerate):
+    def __init__(self, client: SupportsGenerate, *, identity_profile: Optional[Dict[str, Any]] = None):
         self._client = client
+        self._identity_profile = identity_profile or {}
 
     def run(self, message: str) -> Dict[str, Any]:
-        prompt = REFLECTION_PROMPT.format(message=message)
+        prompt = REFLECTION_PROMPT.format(
+            message=message,
+            identity_block=json.dumps(self._identity_profile, indent=2),
+        )
         fallback = ReflectionOutput(
             intent="ambiguous",
             refined_objectives=[],
@@ -98,18 +108,31 @@ class ReflectionRunner:
 
         try:
             raw = self._client.generate(prompt, stop=None)
-            print("RAW REFLECTION OUTPUT:", raw)
         except Exception:
             return fallback.to_dict()
 
         try:
             payload = json.loads(raw)
             output = ReflectionOutput.from_payload(payload)
-            if output.intent == "chat":
-                output.context["chat_mode"] = True
+            self._apply_intent_context(output)
             return output.to_dict()
         except Exception:
             return fallback.to_dict()
+
+    def _apply_intent_context(self, output: ReflectionOutput) -> None:
+        ctx = output.context
+        if output.intent == "chat":
+            ctx["chat_mode"] = True
+            ctx["allowed_tool_kinds"] = []
+        elif output.intent == "query":
+            ctx["query_mode"] = True
+            ctx["allowed_tool_kinds"] = ["sensor"]
+        elif output.intent == "command":
+            ctx["command_mode"] = True
+            ctx["allowed_tool_kinds"] = ["sensor", "actuator"]
+            ctx["force_action"] = True
+        elif output.intent == "objective":
+            ctx["goal_update"] = True
 
 
 __all__ = ["ReflectionRunner", "ReflectionOutput"]

@@ -20,6 +20,7 @@ from app.governor.governor_logic import arbitrate
 from app.meta.meta_actor_runner import MetaActorRunner, MetaActorOutput
 from app.meta.meta_critic_runner import MetaCriticRunner, MetaCriticOutput
 from app.meta.meta_governor_logic import evaluate_meta_cycle
+from app.memory.episodic_memory import EpisodicMemory
 from app.reflection.reflection_runner import ReflectionRunner
 from app.state.state_store import GLOBAL_STATE_STORE
 
@@ -32,8 +33,13 @@ LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
+ROOT_CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
+DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 COG_PARAMS_PATH = CONFIG_DIR / "cog_params.json"
 SYSTEM_LIMITS_PATH = CONFIG_DIR / "system_limits.json"
+POLICY_CONFIG_PATH = ROOT_CONFIG_DIR / "policies.json"
+IDENTITY_PATH = ROOT_CONFIG_DIR / "identity.json"
+EPISODE_LOG_PATH = DATA_DIR / "episodes" / "episodes.jsonl"
 SENSITIVE_FIELD_TOKENS = ("api_key", "apikey", "token", "secret", "password")
 
 
@@ -73,6 +79,9 @@ class ReasoningSupervisor:
         tool_executor: ToolExecutor,
         cog_params: Dict[str, Any],
         system_limits: Dict[str, Any],
+        policy_config: Dict[str, Any],
+        identity_profile: Dict[str, Any],
+        episodic_memory: EpisodicMemory,
         config_path: Path = COG_PARAMS_PATH,
     ) -> None:
         self.actor_runner = actor_runner
@@ -84,6 +93,9 @@ class ReasoningSupervisor:
         self.tool_executor = tool_executor
         self.cog_params = cog_params
         self.system_limits = system_limits
+        self.policy_config = policy_config
+        self.identity_profile = identity_profile
+        self.episodic_memory = episodic_memory
         self._config_path = config_path
         self._meta_cycle_index = 0
         self._meta_frequency = int(self.cog_params.get("meta_frequency", 3) or 3)
@@ -97,10 +109,17 @@ class ReasoningSupervisor:
         reflection: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         ctx = dict(context or {})
+        state_snapshot = self.state_manager.read()
         actor_output = self.actor_runner.run(objectives, context=ctx, memory_snippets=memory_snippets)
         actor_payload = asdict(actor_output)
         critic_output = self.critic_runner.run(actor_payload)
-        decision = arbitrate(actor_output, critic_output, context=ctx)
+        decision = arbitrate(
+            actor_output,
+            critic_output,
+            context=ctx,
+            policy=self.policy_config,
+            system_state=state_snapshot,
+        )
 
         tool_results: List[Dict[str, Any]] = []
         if decision.verdict in {"approve", "trust_actor", "merge", "query_mode"}:
@@ -121,6 +140,14 @@ class ReasoningSupervisor:
 
         cycle_id = self.state_manager.cycle_index - 1
         state_snapshot = self.state_manager.read()
+
+        self._record_episode(
+            cycle_id=cycle_id,
+            objectives=objectives,
+            decision=decision,
+            tool_results=tool_results,
+            reflection=reflection or {},
+        )
 
         response = {
             "cycle": cycle_id,
@@ -177,6 +204,43 @@ class ReasoningSupervisor:
         }
         return summary
 
+    def _record_episode(
+        self,
+        *,
+        cycle_id: int,
+        objectives: List[str],
+        decision: "GovernorDecision",
+        tool_results: List[Dict[str, Any]],
+        reflection: Dict[str, Any],
+    ) -> None:
+        if not self.episodic_memory:
+            return
+
+        actions = [
+            f"{call.tool_name}:{json.dumps(call.arguments, sort_keys=True)}"
+            for call in decision.tool_calls
+        ]
+        readings = {}
+        try:
+            readings = self.tool_executor.get_recent_readings()
+        except AttributeError:
+            readings = {}
+
+        episode = {
+            "cycle": cycle_id,
+            "objectives": objectives,
+            "readings": readings,
+            "actions": actions,
+            "outcome": decision.verdict,
+            "rationale": decision.rationale,
+            "notes": reflection.get("reflection_notes", ""),
+            "tool_results": tool_results,
+        }
+        try:
+            self.episodic_memory.append_episode(episode)
+        except OSError:
+            LOGGER.warning("Failed to persist episode for cycle %s", cycle_id)
+
     def _persist_cog_params(self) -> None:
         try:
             self._config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -216,7 +280,34 @@ app.state.command_interpreter = None
 app.state.reflection_runner = None
 app.state.state_manager = StateManager()
 app.state.memory_manager = MemoryManager()
-app.state.tool_executor = ToolExecutor(app.state.state_manager, app.state.memory_manager)
+app.state.identity_profile = load_json_config(
+    IDENTITY_PATH,
+    {
+        "name": "Spectator",
+        "role": "Local autonomous reasoning agent",
+        "environment": "User's workstation",
+        "capabilities": [],
+        "limitations": [],
+    },
+)
+app.state.policy_config = load_json_config(
+    POLICY_CONFIG_PATH,
+    {
+        "thermal_policy": {
+            "target_min": 50,
+            "target_max": 65,
+            "aggressiveness": 0.5,
+            "max_step_change": 10,
+        }
+    },
+)
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+app.state.episodic_memory = EpisodicMemory(EPISODE_LOG_PATH)
+app.state.tool_executor = ToolExecutor(
+    app.state.state_manager,
+    app.state.memory_manager,
+    tool_config_path=ROOT_CONFIG_DIR / "tools.yaml",
+)
 app.state.cog_params = load_json_config(COG_PARAMS_PATH, {"meta_frequency": 3, "debug_enabled": False})
 app.state.system_limits = load_json_config(SYSTEM_LIMITS_PATH, {})
 
@@ -225,9 +316,20 @@ app.mount("/static", StaticFiles(directory="app/ui/static"), name="static")
 
 
 def natural_chat_response(user_msg: str) -> str:
+    profile: Dict[str, Any] = getattr(app.state, "identity_profile", {})
+    name = profile.get("name", "Spectator")
+    role = profile.get("role", "an autonomous agent")
+    environment = profile.get("environment", "this workstation")
+    capabilities = profile.get("capabilities", [])
+    capability_hint = ""
+    if capabilities:
+        capability_hint = " I can " + ", ".join(capabilities[:2])
+        if len(capabilities) > 2:
+            capability_hint += ", and more"
+        capability_hint += "."
     return (
-        "I am Spectator, your reflection-driven autonomous reasoning system. "
-        f"You said: '{user_msg}'. How can I assist you?"
+        f"I am {name}, {role} operating within {environment}."
+        f"{capability_hint} You said: '{user_msg}'."
     )
 
 
@@ -245,8 +347,16 @@ def configure_supervisor(
     meta_critic_client = meta_critic_client or critic_client
 
     supervisor = ReasoningSupervisor(
-        actor_runner=ActorRunner(actor_client),
-        critic_runner=CriticRunner(critic_client),
+        actor_runner=ActorRunner(
+            actor_client,
+            identity=app.state.identity_profile,
+            policy=app.state.policy_config,
+        ),
+        critic_runner=CriticRunner(
+            critic_client,
+            identity=app.state.identity_profile,
+            policy=app.state.policy_config,
+        ),
         meta_actor_runner=MetaActorRunner(meta_actor_client),
         meta_critic_runner=MetaCriticRunner(meta_critic_client),
         state_manager=app.state.state_manager,
@@ -254,10 +364,16 @@ def configure_supervisor(
         tool_executor=app.state.tool_executor,
         cog_params=app.state.cog_params,
         system_limits=app.state.system_limits,
+        policy_config=app.state.policy_config,
+        identity_profile=app.state.identity_profile,
+        episodic_memory=app.state.episodic_memory,
     )
     app.state.supervisor = supervisor
     app.state.command_interpreter = CommandInterpreter(actor_client)
-    app.state.reflection_runner = ReflectionRunner(actor_client)
+    app.state.reflection_runner = ReflectionRunner(
+        actor_client,
+        identity_profile=app.state.identity_profile,
+    )
 
 
 def get_supervisor() -> ReasoningSupervisor:
@@ -305,6 +421,7 @@ def cycles_page(request: Request, supervisor: ReasoningSupervisor = Depends(get_
     state = supervisor.state_manager.read()
     history = supervisor.state_manager.history()
     gpu_temps = app.state.tool_executor._read_gpu_temps()
+    episodes = app.state.episodic_memory.tail(5)
     return templates.TemplateResponse(
         "cycles.html",
         {
@@ -312,6 +429,7 @@ def cycles_page(request: Request, supervisor: ReasoningSupervisor = Depends(get_
             "state": state,
             "history": history,
             "gpu_temps": gpu_temps,
+            "episodes": episodes,
             "active_tab": "cycles",
         },
     )
@@ -355,15 +473,6 @@ async def command(
     supervisor: ReasoningSupervisor = Depends(get_supervisor),
     interpreter: CommandInterpreter = Depends(get_command_interpreter),
 ):
-    print("---- /command CALLED ----")
-    raw = await request.body()
-    print("RAW BODY:", raw)
-    try:
-        form_data = await request.form()
-        print("FORM DATA:", dict(form_data))
-    except:
-        print("FORM PARSE FAILED")
-
     if message is None:
         try:
             body = await request.json()
@@ -392,35 +501,26 @@ async def chat_api(
     request: Request,
     supervisor: ReasoningSupervisor = Depends(get_supervisor),
 ):
-    print("---- /api/chat CALLED ----")
-    print("Headers:", request.headers)
-
     # Extract message
     message = None
     try:
         form = await request.form()
         message = form.get("message")
-        if message:
-            print("FORM OK:", form)
-    except:
-        pass
+    except Exception:
+        message = None
 
     if not message:
         try:
             raw = await request.json()
             message = raw.get("message")
-            print("JSON OK:", raw)
-        except:
+        except Exception:
             pass
-
-    print("FINAL MESSAGE:", message)
 
     if not message:
         raise HTTPException(400, "No chat message provided")
 
     reflection_runner = get_reflection_runner()
     reflection = reflection_runner.run(message)
-    print("Reflection output:", reflection)
 
     intent = (reflection or {}).get("intent", "ambiguous")
 
@@ -432,7 +532,6 @@ async def chat_api(
 
     if intent == "query":
         ctx = dict(reflection.get("context", {}))
-        ctx["query_mode"] = True
         objectives = reflection.get("refined_objectives") or [message]
         cycle = supervisor.run_cycle(
             objectives=objectives,
@@ -458,11 +557,9 @@ async def chat_api(
         )
 
     if intent == "objective":
-        supervisor.run_cycle(
-            objectives=reflection.get("refined_objectives", []),
-            context=reflection.get("context", {}),
-            memory_snippets=[],
-        )
+        objectives = reflection.get("refined_objectives", []) or [message]
+        for item in objectives:
+            app.state.memory_manager.append(item, {"kind": "user_objective"})
         return templates.TemplateResponse(
             "chat_message_agent.html",
             {"request": request, "message": "Objective registered."},

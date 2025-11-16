@@ -10,6 +10,9 @@ from typing import Any, Dict, List, Optional
 def build_critic_prompt(
     actor_output: Dict[str, Any],
     safety_policies: Optional[List[str]] = None,
+    *,
+    identity: Optional[Dict[str, Any]] = None,
+    policy: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Create the critic instruction prompt using strict JSON formatting."""
 
@@ -23,6 +26,12 @@ def build_critic_prompt(
         f"""
         You are the *Critic* in a hierarchical reasoning system. Review the
         actor output carefully and respond with **valid JSON only**.
+
+        ## Identity & environment
+        {json.dumps(identity or {}, indent=2, ensure_ascii=False)}
+
+        ## Thermal policy guidance
+        {json.dumps(policy or {}, indent=2, ensure_ascii=False)}
 
         ## Actor submission
         {json.dumps(actor_output, indent=2, ensure_ascii=False)}

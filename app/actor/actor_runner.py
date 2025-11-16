@@ -10,6 +10,12 @@ from .actor_prompt import ACTOR_PROMPT
 
 actor_prompt_template = ACTOR_PROMPT + """
 
+IDENTITY:
+{identity}
+
+POLICY_GUIDANCE:
+{policy}
+
 OBJECTIVES:
 {objectives}
 
@@ -64,8 +70,10 @@ class ActorOutput:
 class ActorRunner:
     """Coordinates prompt building, model invocation, and response parsing."""
 
-    def __init__(self, client: SupportsGenerate):
+    def __init__(self, client: SupportsGenerate, *, identity: Optional[Dict[str, Any]] = None, policy: Optional[Dict[str, Any]] = None):
         self._client = client
+        self._identity = identity or {}
+        self._policy = policy or {}
 
     def run(
         self,
@@ -77,10 +85,14 @@ class ActorRunner:
         objectives_block = json.dumps(objectives, indent=2)
         context_block = json.dumps(context or {}, indent=2)
         memory_block = json.dumps(memory_snippets or [], indent=2)
+        identity_block = json.dumps(self._identity, indent=2)
+        policy_block = json.dumps(self._policy, indent=2)
         prompt = actor_prompt_template.format(
             objectives=objectives_block,
             context=context_block,
             memory=memory_block,
+            identity=identity_block,
+            policy=policy_block,
         )
         raw = self._client.generate(prompt, stop=None)
 
