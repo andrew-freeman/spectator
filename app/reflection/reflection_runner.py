@@ -15,21 +15,36 @@ class SupportsGenerate(Protocol):
 
 
 REFLECTION_PROMPT = """
-You are a careful reflection module that analyses a user message before any tools run.
-For the provided USER MESSAGE, respond strictly as a JSON object with the following keys:
-- intent: one of ["query", "command", "objective", "ambiguous"].
-- refined_objectives: array of concise objective strings (may be empty).
-- context: JSON object of contextual hints or structured slots (may be empty).
-- needs_clarification: boolean.
-- reflection_notes: short natural-language explanation.
+You are a careful reflection module that analyses the USER MESSAGE before any tools run.
+
+Your job is to classify the message and decide whether the system should:
+- run a reasoning+tool cycle, OR
+- stay in pure conversational mode.
+
+Return STRICT JSON with the following keys:
+- intent: one of ["query", "command", "objective", "chat", "ambiguous"]
+- refined_objectives: array of concise objective strings (may be empty)
+- context: JSON object with structured hints (may be empty)
+- needs_clarification: boolean
+- reflection_notes: short explanation of reasoning
+
+Rules:
+- If user asks about YOU, system personality, emotions, identity, or casual conversation:
+    intent = "chat"
+- If user expresses gratitude, jokes, or small talk:
+    intent = "chat"
+- If the message requires tools (readings, settings, controls):
+    intent = "query" or "command"
+- If message expresses a high-level goal:
+    intent = "objective"
 
 Example:
 {
-  "intent": "query",
-  "refined_objectives": ["Retrieve GPU readings"],
-  "context": {"query_mode": true},
+  "intent": "chat",
+  "refined_objectives": [],
+  "context": {"chat_mode": true},
   "needs_clarification": false,
-  "reflection_notes": "User is requesting information."
+  "reflection_notes": "User is asking about the agent's identity."
 }
 
 USER MESSAGE:
@@ -48,7 +63,7 @@ class ReflectionOutput:
     @classmethod
     def from_payload(cls, payload: Dict[str, Any]) -> "ReflectionOutput":
         intent = str(payload.get("intent", "ambiguous")).strip().lower() or "ambiguous"
-        if intent not in {"query", "command", "objective", "ambiguous"}:
+        if intent not in {"query", "command", "objective", "chat", "ambiguous"}:
             intent = "ambiguous"
         refined_objectives = [
             str(item).strip()
@@ -84,6 +99,10 @@ class ReflectionRunner:
             raw = self._client.generate(prompt, stop=None)
             payload = json.loads(raw)
             output = ReflectionOutput.from_payload(payload)
+
+            # Inject chat_mode automatically
+            if output.intent == "chat":
+                output.context["chat_mode"] = True
         except Exception:
             # Defensive fallback keeps pipeline resilient.
             output = ReflectionOutput(
