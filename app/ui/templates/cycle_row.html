@@ -1,4 +1,5 @@
 {% set state_snapshot = result.state if result.state is defined else result.get('state', {}) %}
+{% set plan_block = result.plan if result.plan is defined else result.get('plan', result.get('actor', {})) %}
 <details class="bg-white border border-slate-200 p-4 rounded-lg shadow" open>
   <summary class="font-semibold cursor-pointer flex items-center justify-between">
     <span>Cycle {{ result.cycle }}</span>
@@ -9,7 +10,7 @@
   <div class="mt-4 space-y-3 text-sm">
     <details class="bg-slate-50 rounded p-3" open>
       <summary class="font-medium cursor-pointer">Actor Analysis</summary>
-      <pre class="mt-2 overflow-x-auto">{{ result.actor | tojson(indent=2) }}</pre>
+      <pre class="mt-2 overflow-x-auto">{{ plan_block | tojson(indent=2) }}</pre>
     </details>
     <details class="bg-slate-50 rounded p-3">
       <summary class="font-medium cursor-pointer">Critic Evaluation</summary>

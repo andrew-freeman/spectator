@@ -1,11 +1,13 @@
-"""Reflection runner responsible for pre-processing user intent."""
+"""Reflection runner responsible for classifying and rewriting user intent."""
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+import logging
 from typing import Any, Dict, Iterable, Optional, Protocol
 
-from app.core.schemas import PreprocessorOutput, UserInput
+from app.core.schemas import ReflectionOutput
+
+LOGGER = logging.getLogger(__name__)
 
 
 class SupportsGenerate(Protocol):
@@ -16,40 +18,41 @@ class SupportsGenerate(Protocol):
 
 
 REFLECTION_PROMPT = """
-You are a careful reflection module that analyses a USER MESSAGE before any tools run.
+You are the reflection layer for Spectator, a local workstation agent.
+Your task is to interpret the USER MESSAGE before any planning occurs.
+Respond with **STRICT JSON ONLY** following this schema:
+{{
+  "mode": "chat | knowledge | world_query | world_control",
+  "goal": "concise restatement of the user intent",
+  "context": {{"key": "value"}}  // include "chat_mode": true for conversation requests
+  "needs_clarification": false,
+  "reflection_notes": "short reasoning",
+  "metadata": {{}}
+}}
 
-IDENTITY CONTEXT:
-{identity_block}
+Legacy compatibility: mention "intent" in your reflection_notes summary to help downstream tooling.
 
-For the provided USER MESSAGE, respond STRICTLY as a JSON object with the following keys:
-- mode: one of ["chat", "knowledge", "world_query", "world_control", "ambiguous"].
-- goal: a concise restatement of what the user wants.
-- keywords: array of important terms (may be empty).
-- requires_tools: boolean indicating whether tools are needed to satisfy the request.
-- needs_clarification: boolean.
-- clarification_question: a short clarification question IF needs_clarification is true, else null.
-- memory_context: array of short strings summarising relevant past events (may be empty).
-- context: JSON object of contextual hints (may be empty). Use "chat_mode": true for pure conversation.
-- confidence: number in [0,1].
-- notes: short natural-language explanation.
-- Legacy compatibility: mention "intent" inside your notes when summarising the classification.
+The mode descriptions:
+- "chat": general conversation or persona questions.
+- "knowledge": questions that can be answered without tools.
+- "world_query": questions about the real system state that require tools.
+- "world_control": requests to change the system (fan speeds, policies, etc.).
 
-Example:
+Example response:
 {{
   "mode": "world_query",
   "goal": "Retrieve current GPU temperatures",
-  "keywords": ["gpu", "temperature", "nvidia-smi"],
-  "requires_tools": true,
+  "context": {{"query_target": "gpu_temps"}},
   "needs_clarification": false,
-  "clarification_question": null,
-  "memory_context": [],
-  "context": {{"query_mode": true}},
-  "confidence": 0.95,
-  "notes": "User explicitly asked for readings from nvidia-smi."
+  "reflection_notes": "User explicitly asked for nvidia-smi readings.",
+  "metadata": {{"requires_tools": true}}
 }}
 
 USER MESSAGE:
-'''{message}'''
+\"\"\"{message}\"\"\"
+
+IDENTITY CONTEXT:
+{identity_block}
 """.strip()
 
 
@@ -60,74 +63,67 @@ class ReflectionRunner:
         self._client = client
         self._identity_profile = identity_profile or {}
 
-    def run(self, user_input: UserInput | str) -> PreprocessorOutput | Dict[str, Any]:
-        expects_dataclass = isinstance(user_input, UserInput)
-        normalized_input = user_input if expects_dataclass else UserInput(raw_text=str(user_input))
+    def run(self, message: str) -> ReflectionOutput:
+        normalized_message = str(message or "").strip()
         prompt = REFLECTION_PROMPT.format(
-            message=normalized_input.raw_text,
-            identity_block=json.dumps(self._identity_profile, indent=2),
+            message=normalized_message,
+            identity_block=json.dumps(self._identity_profile, indent=2, ensure_ascii=False),
         )
         try:
             raw = self._client.generate(prompt, stop=None)
             payload = json.loads(raw)
-        except Exception:
-            fallback = PreprocessorOutput(
-                mode="ambiguous",
-                goal=normalized_input.raw_text.strip() or "No goal",
-                notes="Reflection fallback invoked; defaulting to ambiguous mode.",
+            return self._to_output(payload, normalized_message)
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.debug("Reflection fallback triggered: %s", exc)
+            return ReflectionOutput(
+                mode="knowledge",
+                goal=normalized_message or "General inquiry",
+                context={},
+                needs_clarification=False,
+                reflection_notes="Fallback reflection; using raw user message as goal.",
+                original_message=normalized_message,
             )
-            return fallback if expects_dataclass else asdict(fallback)
 
-        legacy_intent = payload.get("intent")
-        mode = str(payload.get("mode", "ambiguous")).strip().lower()
-        if not payload.get("mode") and legacy_intent:
-            intent_map = {
+    def _to_output(self, payload: Dict[str, Any], original_message: str) -> ReflectionOutput:
+        mode = str(payload.get("mode", "knowledge")).strip().lower() or "knowledge"
+        if not payload.get("mode") and payload.get("intent"):
+            legacy_map = {
                 "chat": "chat",
                 "query": "world_query",
                 "command": "world_control",
                 "objective": "world_control",
             }
-            mapped = intent_map.get(str(legacy_intent).lower().strip())
+            mapped = legacy_map.get(str(payload.get("intent")).strip().lower())
             if mapped:
                 mode = mapped
-        if mode not in {"chat", "knowledge", "world_query", "world_control", "ambiguous"}:
-            mode = "ambiguous"
+        if mode not in {"chat", "knowledge", "world_query", "world_control"}:
+            mode = "knowledge"
 
-        goal = str(payload.get("goal", normalized_input.raw_text)).strip() or normalized_input.raw_text
-        keywords = [str(k).strip() for k in payload.get("keywords", []) if str(k).strip()]
-        requires_tools = bool(payload.get("requires_tools", False))
-        needs_clarification = bool(payload.get("needs_clarification", False))
-        clarification_question = payload.get("clarification_question")
-        if clarification_question is not None:
-            clarification_question = str(clarification_question).strip() or None
-
-        memory_context = [
-            str(m).strip() for m in payload.get("memory_context", []) if str(m).strip()
-        ]
+        goal = str(payload.get("goal") or original_message or "General inquiry").strip()
         context = payload.get("context") or {}
         if not isinstance(context, dict):
             context = {}
+        needs_clarification = bool(payload.get("needs_clarification", False))
+        notes = str(payload.get("reflection_notes") or payload.get("notes") or "").strip()
+        metadata = payload.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            metadata = {}
         if mode == "chat":
             context.setdefault("chat_mode", True)
         elif mode == "world_query":
             context.setdefault("query_mode", True)
 
-        confidence = float(payload.get("confidence", 0.0) or 0.0)
-        notes = str(payload.get("notes", "")).strip()
-
-        output = PreprocessorOutput(
+        output = ReflectionOutput(
             mode=mode,  # type: ignore[arg-type]
             goal=goal,
-            keywords=keywords,
-            requires_tools=requires_tools,
-            needs_clarification=needs_clarification,
-            clarification_question=clarification_question,
-            memory_context=memory_context,
             context=context,
-            confidence=confidence,
-            notes=notes,
+            needs_clarification=needs_clarification,
+            reflection_notes=notes,
+            original_message=original_message,
+            metadata=metadata,
         )
-        return output if expects_dataclass else asdict(output)
+        LOGGER.info("Reflection classified mode=%s goal=%s", output.mode, output.goal)
+        return output
 
 
 __all__ = ["ReflectionRunner", "SupportsGenerate", "REFLECTION_PROMPT"]
