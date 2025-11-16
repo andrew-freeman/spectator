@@ -331,15 +331,23 @@ async def command(
 @app.post("/api/chat")
 async def chat_api(
     request: Request,
-    message: Optional[str] = Form(None),
     supervisor: ReasoningSupervisor = Depends(get_supervisor),
     interpreter: CommandInterpreter = Depends(get_command_interpreter),
 ):
+    # Prefer form-encoded body (HTMX form POST)
+    message: Optional[str] = None
+    try:
+        form = await request.form()
+        message = form.get("message")
+    except Exception:
+        message = None
+
+    # Fallback: JSON payload with {"message": "..."}
     if not message:
         try:
             body = await request.json()
             message = body.get("message")
-        except Exception:  # pragma: no cover - malformed payload safeguard
+        except Exception:
             message = None
 
     if not message:

@@ -25,13 +25,11 @@
     {% endfor %}
   </div>
   <div class="border-t border-slate-200 px-6 py-4 bg-slate-50">
-    <form 
+    <form
       id="chat-form"
       hx-post="/api/chat"
-      hx-trigger="submit"
       hx-target="#chat-history"
       hx-swap="beforeend"
-      hx-include="#chat-input"
       hx-on:after-request="this.reset()"
       class="flex flex-row gap-2"
     >
