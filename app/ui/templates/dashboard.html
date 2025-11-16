@@ -30,9 +30,9 @@
     <h3 class="text-xl font-semibold">Cycle History</h3>
     <p class="text-sm text-slate-500">Detailed log of each reasoning cycle, including critiques and tool usage.</p>
     <div id="cycle-history" class="space-y-4 mt-4">
-      {% for entry in history %}
-        {% include "cycle_row.html" with result=entry %}
-      {% endfor %}
+		{% for result in history %}
+		  {% include "cycle_row.html" %}
+		{% endfor %}
     </div>
   </section>
 </div>
