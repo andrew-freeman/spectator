@@ -8,7 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Protocol
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Body, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -20,6 +20,7 @@ from app.meta.meta_actor_runner import MetaActorRunner, MetaActorOutput
 from app.meta.meta_critic_runner import MetaCriticRunner, MetaCriticOutput
 from app.meta.meta_governor_logic import evaluate_meta_cycle
 
+from .command_interpreter import CommandInterpreter
 from .memory_manager import MemoryManager
 from .state_manager import StateManager
 from .tool_executor import ToolExecutor
@@ -52,6 +53,10 @@ class CycleResponse(BaseModel):
     tool_results: List[Dict[str, Any]]
     meta: Optional[Dict[str, Any]]
     state: Dict[str, Any]
+
+
+class CommandRequest(BaseModel):
+    message: str = Field(..., description="Natural language instruction for the interpreter")
 
 
 class ReasoningSupervisor:
@@ -185,6 +190,7 @@ def load_json_config(path: Path, default: Dict[str, Any]) -> Dict[str, Any]:
 
 app = FastAPI(title="Self-Reflective LLM Mind")
 app.state.supervisor = None
+app.state.command_interpreter = None
 app.state.state_manager = StateManager()
 app.state.memory_manager = MemoryManager()
 app.state.tool_executor = ToolExecutor(app.state.state_manager, app.state.memory_manager)
@@ -220,6 +226,7 @@ def configure_supervisor(
         system_limits=app.state.system_limits,
     )
     app.state.supervisor = supervisor
+    app.state.command_interpreter = CommandInterpreter(actor_client)
 
 
 def get_supervisor() -> ReasoningSupervisor:
@@ -227,6 +234,13 @@ def get_supervisor() -> ReasoningSupervisor:
     if supervisor is None:
         raise HTTPException(status_code=503, detail="Supervisor not configured. Call configure_supervisor first.")
     return supervisor
+
+
+def get_command_interpreter() -> CommandInterpreter:
+    interpreter: Optional[CommandInterpreter] = getattr(app.state, "command_interpreter", None)
+    if interpreter is None:
+        raise HTTPException(status_code=503, detail="Command interpreter not configured.")
+    return interpreter
 
 
 @app.get("/health")
@@ -268,6 +282,30 @@ def hx_run_cycle(
 @app.get("/history")
 def get_history(supervisor: ReasoningSupervisor = Depends(get_supervisor)) -> Dict[str, Any]:
     return {"history": supervisor.state_manager.history()}
+
+
+@app.post("/command")
+async def command_endpoint(
+    request: Request,
+    payload: Optional[CommandRequest] = Body(default=None),
+    message: Optional[str] = Form(default=None),
+    supervisor: ReasoningSupervisor = Depends(get_supervisor),
+    interpreter: CommandInterpreter = Depends(get_command_interpreter),
+):
+    user_message = (payload.message if payload else None) or message
+    if not user_message:
+        raise HTTPException(status_code=422, detail="Missing command message")
+
+    structured = interpreter.interpret(user_message)
+    result = supervisor.run_cycle(
+        structured.get("objectives", []),
+        context=structured.get("context", {}),
+        memory_snippets=structured.get("memory_snippets", []),
+    )
+
+    if request.headers.get("hx-request") == "true":
+        return templates.TemplateResponse("cycle_row.html", {"request": request, "result": result})
+    return CycleResponse(**result)
 
 
 def _is_sensitive_key(key: str) -> bool:
