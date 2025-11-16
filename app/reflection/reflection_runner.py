@@ -20,6 +20,7 @@ REFLECTION_PROMPT = (
 You are a careful reflection module that analyses a user message before any tools run.
 For the provided USER MESSAGE, respond strictly as a JSON object with the following keys:
 - intent: one of ["query", "command", "objective", "ambiguous"].
+- query_type: one of ["world", "knowledge"].
 - refined_objectives: array of concise objective strings (may be empty).
 - context: JSON object of contextual hints or structured slots (may be empty). Use "chat_mode": true when the user is
   purely conversing.
@@ -32,6 +33,7 @@ IDENTITY PROFILE:
 Example:
 {{
   "intent": "query",
+  "query_type": "world",
   "refined_objectives": ["Retrieve GPU readings"],
   "context": {{
     "query_mode": true
@@ -49,6 +51,7 @@ USER MESSAGE:
 @dataclass
 class ReflectionOutput:
     intent: str = "ambiguous"
+    query_type: str = "knowledge"
     refined_objectives: List[str] = field(default_factory=list)
     context: Dict[str, Any] = field(default_factory=dict)
     needs_clarification: bool = False
@@ -59,6 +62,9 @@ class ReflectionOutput:
         intent = str(payload.get("intent", "ambiguous")).strip().lower() or "ambiguous"
         if intent not in {"query", "command", "objective", "chat", "ambiguous"}:
             intent = "ambiguous"
+        query_type = str(payload.get("query_type", "knowledge")).strip().lower() or "knowledge"
+        if query_type not in {"world", "knowledge"}:
+            query_type = "knowledge"
         refined_objectives = [
             str(item).strip()
             for item in payload.get("refined_objectives", [])
@@ -71,6 +77,7 @@ class ReflectionOutput:
         reflection_notes = str(payload.get("reflection_notes", "")).strip()
         return cls(
             intent=intent,
+            query_type=query_type,
             refined_objectives=refined_objectives,
             context=context,
             needs_clarification=needs_clarification,
@@ -97,6 +104,7 @@ class ReflectionRunner:
                 needs_clarification=False,
                 reflection_notes="Simple query detected; bypassing reflection model.",
             )
+            self._assign_query_type(output, message)
             return output.to_dict()
 
         prompt = REFLECTION_PROMPT.format(
@@ -114,14 +122,17 @@ class ReflectionRunner:
         try:
             raw = self._client.generate(prompt, stop=None)
         except Exception:
+            self._assign_query_type(fallback, message)
             return fallback.to_dict()
 
         try:
             payload = json.loads(raw)
             output = ReflectionOutput.from_payload(payload)
             self._apply_intent_context(output)
+            self._assign_query_type(output, message)
             return output.to_dict()
         except Exception:
+            self._assign_query_type(fallback, message)
             return fallback.to_dict()
 
     def _apply_intent_context(self, output: ReflectionOutput) -> None:
@@ -138,6 +149,47 @@ class ReflectionRunner:
             ctx["force_action"] = True
         elif output.intent == "objective":
             ctx["goal_update"] = True
+
+    def _assign_query_type(self, output: ReflectionOutput, message: str) -> None:
+        query_type = self._determine_query_type(message)
+        output.query_type = query_type
+        ctx = output.context
+        if not isinstance(ctx, dict):
+            ctx = {}
+            output.context = ctx
+        ctx["query_type"] = query_type
+
+    def _determine_query_type(self, message: str) -> str:
+        text = (message or "").strip().lower()
+        if not text:
+            return "knowledge"
+        world_tokens = (
+            "temperature",
+            "temps",
+            "gpu",
+            "nvidia-smi",
+            "fan",
+            "rpm",
+            "load",
+            "usage",
+            "utilization",
+        )
+        if any(token in text for token in world_tokens):
+            return "world"
+        math_like = bool(re.search(r"\d+\s*[+\-*/]", message or ""))
+        identity_like = any(
+            phrase in text
+            for phrase in (
+                "who are you",
+                "what is your name",
+                "what is 2+2",
+                "define",
+                "explain",
+            )
+        )
+        if math_like or identity_like:
+            return "knowledge"
+        return "knowledge"
 
     def _is_simple_query(self, message: str) -> bool:
         text = (message or "").strip()

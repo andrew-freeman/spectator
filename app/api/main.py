@@ -123,7 +123,17 @@ class ReasoningSupervisor:
         )
 
         tool_results: List[Dict[str, Any]] = []
-        if decision.verdict in {"approve", "trust_actor", "merge", "query_mode"}:
+        if ctx.get("query_type") == "knowledge":
+            tool_results = [
+                {
+                    "analysis": actor_output.analysis,
+                    "plan": actor_output.plan,
+                    "tool_calls": [],
+                    "tool_results": [],
+                    "confidence": actor_output.confidence,
+                }
+            ]
+        elif decision.verdict in {"approve", "trust_actor", "merge", "query_mode"}:
             tool_results = self.tool_executor.execute_many(decision.tool_calls)
 
         cycle_record = {
@@ -530,7 +540,10 @@ async def chat_api(
         tool_results=(cycle_result or {}).get("tool_results", []),
         identity_profile=app.state.identity_profile,
     )
-    return final_message
+    return templates.TemplateResponse(
+        "chat_message_agent.html",
+        {"request": request, "message": final_message},
+    )
 
 def _is_sensitive_key(key: str) -> bool:
     lowered = key.lower()

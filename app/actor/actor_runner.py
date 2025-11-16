@@ -83,6 +83,7 @@ class ActorRunner:
         memory_snippets: Optional[List[str]] = None,
     ) -> ActorOutput:
         ctx = context or {}
+        query_type = ctx.get("query_type")
         objectives_block = json.dumps(objectives, indent=2)
         context_block = json.dumps(ctx, indent=2)
         memory_block = json.dumps(memory_snippets or [], indent=2)
@@ -99,6 +100,10 @@ class ActorRunner:
 
         payload = _parse_json(raw)
         output = ActorOutput.from_json(payload)
+        if query_type == "knowledge":
+            if output.tool_calls:
+                output.tool_calls = []
+            return output
         if ctx.get("force_action") and not output.tool_calls:
             logging.getLogger(__name__).warning(
                 "force_action requested but actor produced no tool calls; falling back to reasoning."
