@@ -50,52 +50,57 @@ def arbitrate(
 
     # Missing data guard.
     if not actor.plan or not actor.analysis:
-        decision = GovernorDecision(
-            verdict="request_more_data",
-            rationale="Actor response was incomplete; requesting more context.",
-            metadata=summarise_disagreements(actor, critic),
+        return _finalise(
+            GovernorDecision(
+                verdict="request_more_data",
+                rationale="Actor response was incomplete; requesting more context.",
+                metadata=summarise_disagreements(actor, critic),
+            )
         )
-        return _finalise(decision)
 
     risk = critic.risk_level.lower().strip()
 
     if risk == "unsafe" or risk == "high":
-        decision = GovernorDecision(
-            verdict="defer_to_critic",
-            rationale="Critic identified unsafe or high-risk behaviour.",
-            metadata=summarise_disagreements(actor, critic),
+        return _finalise(
+            GovernorDecision(
+                verdict="defer_to_critic",
+                rationale="Critic identified unsafe or high-risk behaviour.",
+                metadata=summarise_disagreements(actor, critic),
+            )
         )
-        return _finalise(decision)
 
     if critic.confidence < 0.4:
-        decision = GovernorDecision(
+        return _finalise(
+            GovernorDecision(
+                verdict="trust_actor",
+                rationale="Critic confidence too low; defaulting to actor plan.",
+                plan=actor.plan,
+                tool_calls=actor.tool_calls,
+                metadata=summarise_disagreements(actor, critic),
+            )
+        )
+
+    if critic.detected_issues:
+        merged: MergedPlan = merge_plans(actor, critic)
+        return _finalise(
+            GovernorDecision(
+                verdict="merge",
+                rationale="Resolved partial mismatch by merging actor plan with critic feedback.",
+                plan=merged.steps,
+                tool_calls=merged.tool_calls or [],
+                metadata={**summarise_disagreements(actor, critic), "notes": merged.notes},
+            )
+        )
+
+    return _finalise(
+        GovernorDecision(
             verdict="trust_actor",
-            rationale="Critic confidence too low; defaulting to actor plan.",
+            rationale="Critic found no issues and maintained adequate confidence.",
             plan=actor.plan,
             tool_calls=actor.tool_calls,
             metadata=summarise_disagreements(actor, critic),
         )
-        return _finalise(decision)
-
-    if critic.detected_issues:
-        merged: MergedPlan = merge_plans(actor, critic)
-        decision = GovernorDecision(
-            verdict="merge",
-            rationale="Resolved partial mismatch by merging actor plan with critic feedback.",
-            plan=merged.steps,
-            tool_calls=merged.tool_calls or [],
-            metadata={**summarise_disagreements(actor, critic), "notes": merged.notes},
-        )
-        return _finalise(decision)
-
-    decision = GovernorDecision(
-        verdict="trust_actor",
-        rationale="Critic found no issues and maintained adequate confidence.",
-        plan=actor.plan,
-        tool_calls=actor.tool_calls,
-        metadata=summarise_disagreements(actor, critic),
     )
-    return _finalise(decision)
 
 
 __all__ = ["GovernorDecision", "arbitrate"]

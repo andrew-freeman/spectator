@@ -27,7 +27,7 @@ class ToolExecutor:
                 encoding="utf-8",
             )
             temps = [int(x.strip()) for x in output.splitlines() if x.strip().isdigit()]
-            return {"gpu_temperatures": temps}
+            return {"gpu_temps": temps}
         except Exception as exc:  # pragma: no cover - system dependency
             LOGGER.exception("Failed to read GPU temperatures")
             return {"error": str(exc)}
@@ -84,7 +84,7 @@ class ToolExecutor:
 
     def _tool_read_gpu_temps(self, _: Dict[str, Any]) -> Dict[str, Any]:
         result = self._read_gpu_temps()
-        status = "ok" if "gpu_temperatures" in result else "error"
+        status = "ok" if "gpu_temps" in result else "error"
         return {"tool": "read_gpu_temps", "status": status, "result": result}
 
     def _tool_run_system_command(self, arguments: Dict[str, Any]) -> Dict[str, Any]:

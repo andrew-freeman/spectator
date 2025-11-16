@@ -8,6 +8,18 @@ from typing import Any, Dict, Iterable, List, Optional, Protocol
 
 from .actor_prompt import ACTOR_PROMPT
 
+actor_prompt_template = ACTOR_PROMPT + """
+
+OBJECTIVES:
+{objectives}
+
+CONTEXT:
+{context}
+
+MEMORY:
+{memory}
+"""
+
 
 class SupportsGenerate(Protocol):
     """Protocol describing the language model client used by the actor."""
@@ -62,7 +74,14 @@ class ActorRunner:
         memory_snippets: Optional[List[str]] = None,
     ) -> ActorOutput:
         ctx = context or {}
-        prompt = ACTOR_PROMPT
+        objectives_block = json.dumps(objectives, indent=2)
+        context_block = json.dumps(context or {}, indent=2)
+        memory_block = json.dumps(memory_snippets or [], indent=2)
+        prompt = actor_prompt_template.format(
+            objectives=objectives_block,
+            context=context_block,
+            memory=memory_block,
+        )
         raw = self._client.generate(prompt, stop=None)
         payload = _parse_json(raw)
         output = ActorOutput.from_json(payload)

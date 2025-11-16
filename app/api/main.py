@@ -399,6 +399,27 @@ async def chat_api(
     reflection = reflection_runner.run(message)
     LOGGER.info("Reflection output: %s", reflection)
 
+    if reflection["intent"] == "query":
+        # Force query-mode behavior
+        context = reflection.get("context", {})
+        context["query_mode"] = True
+
+        objectives = reflection.get("refined_objectives") or [message]
+        cycle = supervisor.run_cycle(
+            objectives=objectives,
+            context=context,
+            memory_snippets=[],
+        )
+
+        agent_message = cycle.get("tool_results", [])
+        if not agent_message:
+            agent_message = cycle["actor"]["analysis"]
+
+        return templates.TemplateResponse(
+            "chat_message_agent.html",
+            {"request": request, "message": str(agent_message)},
+        )
+
     if reflection.get("needs_clarification"):
         clarification = reflection.get("reflection_notes") or "Could you clarify your request?"
         return templates.TemplateResponse(
