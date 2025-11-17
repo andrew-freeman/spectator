@@ -117,6 +117,32 @@ class GovernorDecision:
             "metadata": dict(self.metadata),
         }
 
+@dataclass
+class CortexOutput:
+    """
+    Meta-level summary and guidance produced by the Agent Cortex.
+
+    This object is advisory: it suggests next objectives, a possible mode hint,
+    and some self/world notes for debugging or future reflection.
+    The supervisor or higher layers decide how much of this to honor.
+    """
+
+    next_objectives: List[str]
+    mode_hint: Optional[Mode]
+    force_action: bool
+    safety_bias: Literal["conservative", "normal", "aggressive"]
+    self_notes: List[str]
+    world_notes: List[str]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "next_objectives": list(self.next_objectives),
+            "mode_hint": self.mode_hint,
+            "force_action": self.force_action,
+            "safety_bias": self.safety_bias,
+            "self_notes": list(self.self_notes),
+            "world_notes": list(self.world_notes),
+        }
 
 __all__ = [
     "Mode",
@@ -126,4 +152,5 @@ __all__ = [
     "PlannerPlan",
     "CriticOutput",
     "GovernorDecision",
+    "CortexOutput",
 ]

@@ -26,6 +26,10 @@ from app.memory.episodic_memory import EpisodicMemory
 from app.reflection.reflection_runner_v3 import ReflectionRunnerV3
 from app.state.state_store import GLOBAL_STATE_STORE
 from app.history.history_manager import HistoryManager
+from app.cortex.cortex_runner_v1 import CortexRunner
+
+from app.self_model import load_self_model, save_self_model, update_self_model_from_cycle
+from app.world_model import load_world_model, save_world_model, update_world_model_from_cycle
 
 from .command_interpreter import CommandInterpreter
 from .memory_manager import MemoryManager
@@ -104,6 +108,7 @@ class ReasoningSupervisor:
         reflection_runner: ReflectionRunner,
         planner_runner: PlannerRunner,
         critic_runner: CriticRunner,
+        cortex_runner: Optional[CortexRunner] = None,
         state_manager: StateManager,
         memory_manager: MemoryManager,
         tool_executor: ToolExecutor,
@@ -116,6 +121,7 @@ class ReasoningSupervisor:
         self.reflection_runner = reflection_runner
         self.planner_runner = planner_runner
         self.critic_runner = critic_runner
+        self.cortex_runner = cortex_runner
         self.state_manager = state_manager
         self.memory_manager = memory_manager
         self.tool_executor = tool_executor
@@ -126,6 +132,8 @@ class ReasoningSupervisor:
         self.system_limits = system_limits or {}
         self.responder = ResponderHardV3()
         #self.responder = ResponderSoftV3() # for further evaluation
+        self.self_model = load_self_model(DATA_DIR / "self_model.json")
+        self.world_model = load_world_model(DATA_DIR / "world_model.json")
 
     def run_user_input(
         self,
@@ -230,6 +238,34 @@ class ReasoningSupervisor:
             "state": updated_state,
         }
         self.state_manager.log_cycle(cycle_record)
+        
+        # ---- SelfModel update ----
+        self.self_model = update_self_model_from_cycle(self.self_model, cycle_record)
+        save_self_model(self.self_model, DATA_DIR / "self_model.json")
+
+        # ---- WorldModel update ----
+        self.world_model = update_world_model_from_cycle(self.world_model, cycle_record)
+        save_world_model(self.world_model, DATA_DIR / "world_model.json")
+        
+        # ---- Cortex passive run ----
+        if self.cortex_runner:
+            from app.cortex.cortex_runner_v1 import CortexInputBundle
+
+            cinput = CortexInputBundle(
+                last_cycle=cycle_record,
+                self_model=self.self_model,
+                world_model=self.world_model,
+                current_objectives=[reflection.goal] if reflection.goal else [],
+                last_user_message=user_message,
+            )
+
+            cortex_output = self.cortex_runner.run(cinput)
+            history.append({
+                "type": "cortex",
+                "timestamp": time.time(),
+                "output": cortex_output.to_dict(),
+            })
+        
         snapshot = {
             "cycle": cycle_id,
             "reflection": cycle_record["reflection"],
@@ -360,19 +396,16 @@ def configure_supervisor(
         history_manager=history,
     )
     #reflection_runner = ReflectionRunner(actor_client, identity_profile=identity_profile)
-    reflection_runner = ReflectionRunnerV3(
-        actor_client,
-        identity_profile=identity_profile,
-        policy=policy_config,
-    )
-    
+    reflection_runner = ReflectionRunnerV3(actor_client, identity_profile=identity_profile, policy=policy_config)
     planner_runner = PlannerRunner(actor_client, identity=identity_profile, policy=policy_config)
     critic_runner = CriticRunner(critic_client, identity=identity_profile, policy=policy_config)
+    cortex_runner = CortexRunner(actor_client, history=history)
 
     supervisor = ReasoningSupervisor(
         reflection_runner=reflection_runner,
         planner_runner=planner_runner,
         critic_runner=critic_runner,
+        cortex_runner=cortex_runner,
         state_manager=state_manager,
         memory_manager=memory_manager,
         tool_executor=tool_executor,
@@ -388,6 +421,7 @@ def configure_supervisor(
     app.state.reflection_runner = reflection_runner
     app.state.planner_runner = planner_runner
     app.state.critic_runner = critic_runner
+    app.state.cortex_runner = cortex_runner
     app.state.state_manager = state_manager
     app.state.memory_manager = memory_manager
     app.state.tool_executor = tool_executor
