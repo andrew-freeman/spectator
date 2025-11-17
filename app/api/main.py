@@ -239,14 +239,6 @@ class ReasoningSupervisor:
         }
         self.state_manager.log_cycle(cycle_record)
         
-        # ---- SelfModel update ----
-        self.self_model = update_self_model_from_cycle(self.self_model, cycle_record)
-        save_self_model(self.self_model, DATA_DIR / "self_model.json")
-
-        # ---- WorldModel update ----
-        self.world_model = update_world_model_from_cycle(self.world_model, cycle_record)
-        save_world_model(self.world_model, DATA_DIR / "world_model.json")
-        
         # ---- Cortex passive run ----
         if self.cortex_runner:
             from app.cortex.cortex_runner_v1 import CortexInputBundle
@@ -266,6 +258,14 @@ class ReasoningSupervisor:
                 "output": cortex_output.to_dict(),
             })
         
+        # ---- SelfModel update ----
+        self.self_model = update_self_model_from_cycle(self.self_model, cycle_record)
+        save_self_model(self.self_model, DATA_DIR / "self_model.json")
+
+        # ---- WorldModel update ----
+        self.world_model = update_world_model_from_cycle(self.world_model, cycle_record)
+        save_world_model(self.world_model, DATA_DIR / "world_model.json")
+                
         snapshot = {
             "cycle": cycle_id,
             "reflection": cycle_record["reflection"],
