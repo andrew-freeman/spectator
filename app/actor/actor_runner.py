@@ -5,9 +5,19 @@ import json
 import logging
 from typing import Any, Dict, Iterable, List, Optional, Protocol
 
-from app.core.schemas import PlannerPlan, ReflectionOutput, ToolCall
+#V2
+#from app.core.schemas import PlannerPlan, ReflectionOutput, ToolCall
 
-from .actor_prompt import PLANNER_PROMPT
+#V2
+#from .actor_prompt import PLANNER_PROMPT
+
+#V3
+from app.core.schemas import PlannerPlan, ReflectionOutput, ToolCall
+from app.core.tool_registry import READ_TOOLS, CONTROL_TOOLS
+
+#V3
+from .planner_prompt_builder_v3 import build_planner_prompt_v3
+from .planner_output_parser_v3 import PlannerParseError, parse_planner_output_v3
 
 LOGGER = logging.getLogger(__name__)
 
@@ -41,34 +51,20 @@ class PlannerRunner:
         memory_context: Optional[List[str]] = None,
     ) -> PlannerPlan:
         """Build the planner prompt, call the LLM, and parse the result."""
-        memory_block = memory_context or []
-        prompt = PLANNER_PROMPT.format(
-            reflection=json.dumps(reflection.to_dict(), indent=2, ensure_ascii=False),
-            state=json.dumps(current_state or {}, indent=2, ensure_ascii=False),
-            memory=json.dumps(memory_block, indent=2, ensure_ascii=False),
-            identity=json.dumps(self._identity, indent=2, ensure_ascii=False),
-            policy=json.dumps(self._policy, indent=2, ensure_ascii=False),
-        )
         try:
+            prompt = build_planner_prompt_v3(
+                reflection,
+                current_state or {},
+                memory_context=memory_context or [],
+                identity=self._identity,
+                policy=self._policy,
+            )
             raw = self._client.generate(prompt, stop=None)
-            payload = self._parse_json(raw)
+            payload = parse_planner_output_v3(raw)
             return self._build_plan(payload, reflection=reflection)
-        except Exception as exc:  # pragma: no cover - defensive fallback
+        except (PlannerParseError, Exception) as exc:  # pragma: no cover - defensive fallback
             LOGGER.warning("Planner fallback invoked due to error: %s", exc)
             return self._fallback_plan(reflection)
-
-    # ------------------------------------------------------------------ #
-    # Parsing helpers
-    # ------------------------------------------------------------------ #
-
-    def _parse_json(self, raw: str) -> Dict[str, Any]:
-        """Extract the first top-level JSON object from a raw completion."""
-        snippet = raw.strip()
-        first = snippet.find("{")
-        last = snippet.rfind("}")
-        if first != -1 and last != -1:
-            snippet = snippet[first : last + 1]
-        return json.loads(snippet)
 
     def _build_plan(self, payload: Dict[str, Any], *, reflection: ReflectionOutput) -> PlannerPlan:
         """Normalise the raw JSON payload into a PlannerPlan."""

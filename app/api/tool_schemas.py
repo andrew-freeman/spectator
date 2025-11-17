@@ -15,6 +15,16 @@ TOOL_SCHEMAS: Dict[str, Dict] = {
             "additionalProperties": False,
         },
     },
+    "read_gpu_memory": {
+        "name": "read_gpu_memory",
+        "description": "Read GPU memory usage in MB using nvidia-smi.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False,
+        },
+    },
     "set_fan_speed": {
         "name": "set_fan_speed",
         "description": "Adjust the active cooling fan speed in percent (0-80).",

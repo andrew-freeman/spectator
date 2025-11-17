@@ -111,6 +111,10 @@ class ReflectionRunner:
                 if output.mode not in {"world_query", "world_control"}:
                     output.mode = "knowledge"  # type: ignore[attr-defined]
 
+            #if any(term in goal_lower for term in ["vram", "gpu memory", "memory usage", "memory used", "gpu ram"]):
+            #    mode = "world_query"
+            #    context["gpu_query_type"] = "memory"
+
             return output
 
         except Exception:

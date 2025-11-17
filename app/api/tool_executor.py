@@ -92,6 +92,26 @@ class ToolExecutor:
                 error=str(exc),
             )
 
+    def _tool_read_gpu_memory(self, **_: Any) -> ToolResult:
+        try:
+            output = subprocess.check_output(
+                ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+                encoding="utf-8",
+            )
+            mems = [int(m.strip()) for m in output.splitlines() if m.strip()]
+            return ToolResult(
+                tool="read_gpu_memory",
+                status="ok",
+                result={"memory_used_mb": mems},
+            )
+        except Exception as exc:
+            return ToolResult(
+                tool="read_gpu_memory",
+                status="error",
+                result={},
+                error=str(exc),
+            )
+
     def _tool_read_state(self, **_: Any) -> ToolResult:
         return ToolResult(
             tool="read_state",
