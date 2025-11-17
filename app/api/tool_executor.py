@@ -7,6 +7,7 @@ import time
 from typing import Any, Dict, List, Sequence
 
 from app.core.schemas import ToolCall, ToolResult
+from app.history.history_manager import HistoryManager
 
 from .memory_manager import MemoryManager
 from .state_manager import StateManager
@@ -24,12 +25,14 @@ class ToolExecutor:
         memory_manager: MemoryManager,
         policy_config: Dict[str, Any] | None,
         system_limits: Dict[str, Any] | None,
+        history_manager: HistoryManager | None = None,
     ) -> None:
         self._state_manager = state_manager
         self._memory_manager = memory_manager
         self._policy_config = policy_config or {}
         self._system_limits = system_limits or {}
         self._recent_sensors: Dict[str, Dict[str, Any]] = {}
+        self._history = history_manager
 
         bounds = (self._system_limits.get("fan_speed_bounds") or {})
         self._fan_min = float(bounds.get("min", 0.0))
@@ -41,22 +44,26 @@ class ToolExecutor:
     def execute(self, call: ToolCall) -> ToolResult:
         handler = getattr(self, f"_tool_{call.name}", None)
         if handler is None:
-            return ToolResult(
+            result = ToolResult(
                 tool=call.name,
                 status="error",
                 result={},
                 error=f"Unknown tool: {call.name}",
             )
+            self._log_tool_history(call, result)
+            return result
         try:
-            return handler(**call.arguments)
+            result = handler(**call.arguments)
         except Exception as exc:
             LOGGER.exception("Tool %s failed", call.name)
-            return ToolResult(
+            result = ToolResult(
                 tool=call.name,
                 status="error",
                 result={},
                 error=str(exc),
             )
+        self._log_tool_history(call, result)
+        return result
 
     def execute_many(self, calls: Sequence[ToolCall]) -> List[ToolResult]:
         return [self.execute(call) for call in calls]
@@ -195,6 +202,23 @@ class ToolExecutor:
     # ------------------------------------------------------------------
     def _record_sensor(self, name: str, value: Any) -> None:
         self._recent_sensors[name] = {"value": value, "timestamp": time.time()}
+
+    def _log_tool_history(self, call: ToolCall, result: ToolResult) -> None:
+        if not self._history:
+            return
+        try:
+            payload = result.to_dict()
+        except AttributeError:
+            payload = dict(result)
+        self._history.append(
+            {
+                "type": "tool_result",
+                "timestamp": time.time(),
+                "tool": call.name,
+                "arguments": call.arguments,
+                "result": payload,
+            }
+        )
 
     def _read_gpu_temps(self) -> Dict[str, Any]:
         """Legacy helper used by UI."""

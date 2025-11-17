@@ -15,9 +15,21 @@
     id="chat-history"
     class="h-[65vh] overflow-y-auto space-y-4 px-6 py-6"
     hx-on::afterSwap="this.scrollTop = this.scrollHeight">
-    {% set message = "Welcome! Tell me what objective you'd like me to pursue and I'll run the appropriate reasoning cycle." %}
-    {% include "chat_message_agent.html" %}
-    {% for entry in history %}
+    {% if history %}
+      {% for entry in history %}
+        {% if entry.type == 'user' %}
+          {% set message = entry.message %}
+          {% include "chat_message_user.html" %}
+        {% elif entry.type == 'assistant' %}
+          {% set message = entry.message %}
+          {% include "chat_message_agent.html" %}
+        {% endif %}
+      {% endfor %}
+    {% else %}
+      {% set message = "Welcome! Tell me what objective you'd like me to pursue and I'll run the appropriate reasoning cycle." %}
+      {% include "chat_message_agent.html" %}
+    {% endif %}
+    {% for entry in cycle_history or [] %}
       <div>
         {% set result = entry %}
         {% include "cycle_row.html" %}
