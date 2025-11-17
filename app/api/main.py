@@ -15,7 +15,9 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from app.actor.actor_runner import PlannerRunner
-from app.agent.responder import Responder
+#from app.agent.responder import Responder
+from app.response.responder_hard_v3 import ResponderHardV3
+#from app.response.responder_soft_v3 import ResponderSoftV3
 from app.core.schemas import GovernorDecision, ReflectionOutput, ToolResult
 from app.critic.critic_runner import CriticRunner
 from app.governor.governor_logic import arbitrate
@@ -121,7 +123,8 @@ class ReasoningSupervisor:
         self.episodic_memory = episodic_memory
         self.cog_params = cog_params or {}
         self.system_limits = system_limits or {}
-        self.responder = Responder()
+        self.responder = ResponderHardV3()
+        #self.responder = ResponderSoftV3() # for further evaluation
 
     def run_user_input(
         self,
