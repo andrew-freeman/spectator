@@ -22,7 +22,8 @@ from app.core.schemas import GovernorDecision, ReflectionOutput, ToolResult
 from app.critic.critic_runner import CriticRunner
 from app.governor.governor_logic import arbitrate
 from app.memory.episodic_memory import EpisodicMemory
-from app.reflection.reflection_runner import ReflectionRunner
+#from app.reflection.reflection_runner import ReflectionRunner
+from app.reflection.reflection_runner_v3 import ReflectionRunnerV3
 from app.state.state_store import GLOBAL_STATE_STORE
 from app.history.history_manager import HistoryManager
 
@@ -358,7 +359,13 @@ def configure_supervisor(
         system_limits=system_limits,
         history_manager=history,
     )
-    reflection_runner = ReflectionRunner(actor_client, identity_profile=identity_profile)
+    #reflection_runner = ReflectionRunner(actor_client, identity_profile=identity_profile)
+    reflection_runner = ReflectionRunnerV3(
+        actor_client,
+        identity_profile=identity_profile,
+        policy=policy_config,
+    )
+    
     planner_runner = PlannerRunner(actor_client, identity=identity_profile, policy=policy_config)
     critic_runner = CriticRunner(critic_client, identity=identity_profile, policy=policy_config)
 

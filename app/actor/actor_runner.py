@@ -91,6 +91,19 @@ class PlannerRunner:
             if str(step).strip()
         ]
 
+        # Enforce bounded multi-step decomposition: at most 3 steps.
+        if len(steps) > 3:
+            steps = steps[:3]
+
+        if not steps:
+            # Fallback: use analysis or goal as a single step.
+            if analysis:
+                steps = [analysis]
+            elif goal_text:
+                steps = [goal_text]
+            else:
+                steps = ["Respond to the user request."]
+
         tool_calls = self._parse_tool_calls(payload.get("tool_calls", []))
 
         response_type = str(payload.get("response_type", "text")).strip().lower()

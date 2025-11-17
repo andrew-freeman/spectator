@@ -5,6 +5,7 @@ import logging
 from typing import Any, Dict, Iterable, List, Optional, Protocol
 
 from app.core.schemas import PlannerPlan, ReflectionOutput, ToolCall
+from app.core.tool_registry import READ_TOOLS, CONTROL_TOOLS
 from app.actor.planner_prompt_builder_v3 import build_planner_prompt_v3
 from app.actor.planner_output_parser_v3 import (
     PlannerParseError,
@@ -160,7 +161,61 @@ Rules:
         needs_risk_check = bool(payload.get("needs_risk_check", mode in {"world_query", "world_control"}))
 
         # -------------------------------------------------------
-        # 3. KNOWLEDGE-MODE SANITY FILTERS
+        # 3. TOOL-TYPE NORMALISATION (READ vs CONTROL)
+        # -------------------------------------------------------
+        # Partition tool calls by type using the registry.
+        read_calls: List[ToolCall] = []
+        control_calls: List[ToolCall] = []
+        other_calls: List[ToolCall] = []
+
+        for call in tool_calls:
+            if call.name in READ_TOOLS:
+                read_calls.append(call)
+            elif call.name in CONTROL_TOOLS:
+                control_calls.append(call)
+            else:
+                other_calls.append(call)
+
+        # Enforce strict separation:
+        # - WORLD_QUERY → read-only
+        # - WORLD_CONTROL → control-only
+        # If a WORLD_CONTROL plan mixes read + control, we degrade
+        # it to a read-only WORLD_QUERY "first pass".
+        if mode == "world_query":
+            if read_calls:
+                tool_calls = read_calls
+            else:
+                tool_calls = []
+        elif mode == "world_control":
+            if read_calls and control_calls:
+                # Dual-stage behaviour: we treat this as the first,
+                # read-only pass. Governor will execute it as a query.
+                mode = "world_query"
+                tool_calls = read_calls
+                needs_risk_check = True
+                # Optional gentle nudge in analysis/steps.
+                if "query" not in analysis.lower():
+                    analysis = (
+                        analysis + " First, query the system state before deciding any control actions."
+                    ).strip()
+                if not any("read" in s.lower() or "query" in s.lower() for s in steps):
+                    steps.append("Read current system state before taking any control actions.")
+            elif control_calls:
+                tool_calls = control_calls
+            elif read_calls:
+                # No control tools at all; treat as a query instead.
+                mode = "world_query"
+                tool_calls = read_calls
+            else:
+                # No recognised tools; leave as-is and let fallback logic handle it later.
+                tool_calls = other_calls
+        else:
+            # CHAT / KNOWLEDGE: ignore tools; they should be empty anyway.
+            if mode in {"chat", "knowledge"}:
+                tool_calls = []
+
+        # -------------------------------------------------------
+        # 4. KNOWLEDGE-MODE SANITY FILTERS
         # -------------------------------------------------------
         if mode == "knowledge":
 
@@ -212,14 +267,14 @@ Rules:
             needs_risk_check = False
 
         # -------------------------------------------------------
-        # 4. CHAT MODE (no tools)
+        # 5. CHAT MODE (no tools)
         # -------------------------------------------------------
         elif mode == "chat":
             tool_calls = []
             needs_risk_check = False
 
         # -------------------------------------------------------
-        # 5. WORLD_QUERY – ensure at least one read tool
+        # 6. WORLD_QUERY – ensure at least one read tool
         # -------------------------------------------------------
         elif mode == "world_query" and not tool_calls:
             gl = goal_lower
@@ -233,13 +288,13 @@ Rules:
                 tool_calls = [ToolCall(name="read_state", arguments={})]
 
         # -------------------------------------------------------
-        # 6. WORLD_CONTROL – ensure a safe default control tool
+        # 7. WORLD_CONTROL – ensure a safe default control tool
         # -------------------------------------------------------
         elif mode == "world_control" and not tool_calls:
             tool_calls = [ToolCall(name="noop_control", arguments={"reason": "planner_fallback_noop"})]
 
         # -------------------------------------------------------
-        # 7. RETURN NORMALIZED PLAN
+        # 8. RETURN NORMALIZED PLAN
         # -------------------------------------------------------
         return PlannerPlan(
             mode=mode,  # type: ignore[arg-type]

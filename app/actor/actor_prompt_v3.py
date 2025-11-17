@@ -13,6 +13,9 @@ in this exact order, with no missing sections, and no additional commentary:
 #STEPS:
 - <step 1>
 - <step 2>
+- <step 3>
+(Use 1–3 short steps, each a single concrete action or reasoning move.
+Never use more than 3 steps.)
 
 #TOOL_CALLS:
 - <tool_name>
