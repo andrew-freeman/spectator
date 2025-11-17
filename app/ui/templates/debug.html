@@ -53,4 +53,9 @@
     <pre class="bg-slate-900 text-green-200 text-sm rounded-lg p-4 overflow-x-auto">{{ snapshot.cog_params | tojson(indent=2) }}</pre>
   </div>
 </section>
+
+<section class="bg-white rounded-xl shadow border border-slate-200 p-6">
+  <h2 class="text-xl font-bold mb-2">Session History</h2>
+  <pre class="bg-slate-900 text-green-200 text-sm p-4 rounded">{{ history | tojson(indent=2) }}</pre>
+</section>
 {% endblock %}

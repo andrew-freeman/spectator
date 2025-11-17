@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Protocol
 
@@ -21,6 +22,7 @@ from app.governor.governor_logic import arbitrate
 from app.memory.episodic_memory import EpisodicMemory
 from app.reflection.reflection_runner import ReflectionRunner
 from app.state.state_store import GLOBAL_STATE_STORE
+from app.history.history_manager import HistoryManager
 
 from .command_interpreter import CommandInterpreter
 from .memory_manager import MemoryManager
@@ -62,6 +64,7 @@ class CycleRequest(BaseModel):
 
 
 app = FastAPI()
+history = HistoryManager()
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 TEMPLATE_DIR = BASE_DIR / "app" / "ui" / "templates"
@@ -160,6 +163,13 @@ class ReasoningSupervisor:
         reflection = self.reflection_runner.run(user_message)
         if context:
             reflection.context.update(context)
+        history.append(
+            {
+                "type": "reflection",
+                "timestamp": time.time(),
+                "output": reflection.to_dict(),
+            }
+        )
         current_state = self.state_manager.read()
         memory_context = self._collect_memory_context(memory_snippets)
         plan = self.planner_runner.run(
@@ -167,7 +177,21 @@ class ReasoningSupervisor:
             current_state,
             memory_context=memory_context,
         )
+        history.append(
+            {
+                "type": "planner",
+                "timestamp": time.time(),
+                "output": plan.to_dict(),
+            }
+        )
         critic_output = self.critic_runner.run_plan(plan, mode=reflection.mode)
+        history.append(
+            {
+                "type": "critic",
+                "timestamp": time.time(),
+                "output": critic_output.to_dict(),
+            }
+        )
         decision = arbitrate(
             plan,
             critic_output,
@@ -217,6 +241,13 @@ class ReasoningSupervisor:
             policy=self.policy_config,
             original_message=user_message,
             current_state=updated_state,
+        )
+        history.append(
+            {
+                "type": "assistant",
+                "timestamp": time.time(),
+                "message": final_text,
+            }
         )
         return {
             "final_text": final_text,
@@ -315,6 +346,7 @@ def configure_supervisor(
         memory_manager=memory_manager,
         policy_config=policy_config,
         system_limits=system_limits,
+        history_manager=history,
     )
     reflection_runner = ReflectionRunner(actor_client, identity_profile=identity_profile)
     planner_runner = PlannerRunner(actor_client, identity=identity_profile, policy=policy_config)
@@ -378,10 +410,16 @@ def root_redirect() -> RedirectResponse:
 
 @app.get("/chat")
 def chat_page(request: Request, supervisor: ReasoningSupervisor = Depends(get_supervisor)):
-    history = supervisor.state_manager.history()
+    cycle_history = supervisor.state_manager.history()
+    session_history = history.load()
     return templates.TemplateResponse(
         "chat.html",
-        {"request": request, "history": history, "active_tab": "chat"},
+        {
+            "request": request,
+            "history": session_history,
+            "cycle_history": cycle_history,
+            "active_tab": "chat",
+        },
     )
 
 
@@ -499,6 +537,13 @@ async def chat_api(
     if not message:
         raise HTTPException(400, "No chat message provided")
 
+    history.append(
+        {
+            "type": "user",
+            "timestamp": time.time(),
+            "message": message,
+        }
+    )
     agent_output = supervisor.run_user_input(message)
     final_message = agent_output.get("final_text") or "I processed your request."
     return templates.TemplateResponse(
@@ -557,7 +602,12 @@ def debug_system(
     snapshot = _build_debug_snapshot(supervisor)
     return templates.TemplateResponse(
         "debug.html",
-        {"request": request, "snapshot": snapshot, "active_tab": "debug"},
+        {
+            "request": request,
+            "snapshot": snapshot,
+            "history": history.load(),
+            "active_tab": "debug",
+        },
     )
 
 
