@@ -40,10 +40,16 @@ class ReflectionRunnerV3:
         *,
         identity_profile: Optional[Dict[str, Any]] = None,
         policy: Optional[Dict[str, Any]] = None,
-    ) -> None:
+        self_model=None,
+        world_model=None,
+        cortex_runner=None,
+    ):
         self._client = client
         self._identity = identity_profile or {}
         self._policy = policy or {}
+        self._self_model = self_model
+        self._world_model = world_model
+        self._cortex_runner = cortex_runner
 
     # Public API (same shape as existing ReflectionRunner)
     # ------------------------------------------------------------------
@@ -63,8 +69,12 @@ class ReflectionRunnerV3:
     def _build_prompt(self, user_message: str) -> str:
         identity_json = json.dumps(self._identity, ensure_ascii=False, indent=2)
         policy_json = json.dumps(self._policy, ensure_ascii=False, indent=2)
+        self_json = json.dumps(self._self_model.to_dict(), ensure_ascii=False, indent=2) if self._self_model else "{}"
+        world_json = json.dumps(self._world_model.to_dict(), ensure_ascii=False, indent=2) if self._world_model else "{}"
 
         prompt = REFLECTION_PROMPT_V3
+        prompt = prompt.replace("<<SELF_MODEL_JSON>>", self_json)
+        prompt = prompt.replace("<<WORLD_MODEL_JSON>>", world_json)
         prompt = prompt.replace("<<USER_MESSAGE>>", user_message)
         prompt = prompt.replace("<<IDENTITY_JSON>>", identity_json)
         prompt = prompt.replace("<<POLICY_JSON>>", policy_json)
@@ -172,18 +182,101 @@ class ReflectionRunnerV3:
             notes=notes,
         )
 
-    # Conversion and fallback
-    # ------------------------------------------------------------------
     def _to_reflection_output(self, sections: ReflectionSections, *, user_message: str) -> ReflectionOutput:
-        # Merge the parsed context with simple top-level flags
+        """
+        Convert parsed reflection sections into the ReflectionOutput structure,
+        injecting SelfModel + WorldModel priors + planner hints.
+        """
+        # Start with parsed context
         context = dict(sections.context)
 
-        # Example flags we may want to carry downstream:
-        # - chat_mode (for responder)
-        # - goal_update / objective flags could be added later
+        # ------------------------------------------------------------------
+        # 1. Basic flag: chat_mode
+        # ------------------------------------------------------------------
         if sections.mode == "chat":
             context.setdefault("chat_mode", True)
 
+        # ------------------------------------------------------------------
+        # 2. Inject SelfModel signals (persistent self-awareness)
+        # ------------------------------------------------------------------
+        if self._self_model:
+            try:
+                # last 10 capabilities
+                if getattr(self._self_model, "capabilities", None):
+                    context.setdefault(
+                        "agent_capabilities",
+                        self._self_model.capabilities[-10:]
+                    )
+
+                # open loops (active projects)
+                if getattr(self._self_model, "open_loops", None):
+                    context.setdefault(
+                        "agent_open_loops",
+                        self._self_model.open_loops[-5:]
+                    )
+
+                # internal hypotheses (emerging "thoughts")
+                if getattr(self._self_model, "hypotheses", None):
+                    context.setdefault(
+                        "agent_hypotheses",
+                        self._self_model.hypotheses[-5:]
+                    )
+
+            except Exception:
+                pass  # always safe — reflection must not break
+
+        # ------------------------------------------------------------------
+        # 3. Inject WorldModel signals (environmental memory)
+        # ------------------------------------------------------------------
+        if self._world_model:
+            try:
+                # last overall system state snapshot
+                if getattr(self._world_model, "last_state", None):
+                    context.setdefault(
+                        "env_last_state",
+                        self._world_model.last_state
+                    )
+
+                # last GPU temperatures
+                if getattr(self._world_model, "gpu_temps_history", None) and self._world_model.gpu_temps_history:
+                    last_entry = self._world_model.gpu_temps_history[-1]
+                    context.setdefault("env_last_gpu_temps", last_entry.get("temps"))
+
+                # last GPU memory readings
+                if getattr(self._world_model, "gpu_memory_history", None) and self._world_model.gpu_memory_history:
+                    mem = self._world_model.gpu_memory_history[-1]
+                    context.setdefault("env_last_gpu_memory", mem.get("memory_used_mb"))
+
+            except Exception:
+                pass
+
+        # ------------------------------------------------------------------
+        # 4. Planner V3.5 hints — decision-shaping metadata
+        # ------------------------------------------------------------------
+
+        # If the goal "looks complex", request multi-step decomposition
+        complexity_keywords = ["analyse", "analysis", "why", "explain", "investigate",
+                               "deep", "multi-step", "multi step", "break down"]
+        if any(k in sections.goal.lower() for k in complexity_keywords):
+            context["planner_needs_decomposition"] = True
+
+        # Control-mode → planner must include explicit safety step
+        if sections.mode == "world_control":
+            context["planner_must_include_safety_check"] = True
+
+        # Queries about system state → skip unnecessary decomposition
+        if sections.mode == "world_query":
+            context.setdefault("planner_simple_query", True)
+
+        # ------------------------------------------------------------------
+        # 5. Cortex integration hook (passive for now)
+        # ------------------------------------------------------------------
+        if self._cortex_runner:
+            context.setdefault("cortex_enabled", True)
+
+        # ------------------------------------------------------------------
+        # Build final reflection output
+        # ------------------------------------------------------------------
         return ReflectionOutput(
             mode=sections.mode,  # type: ignore[arg-type]
             goal=sections.goal or user_message,

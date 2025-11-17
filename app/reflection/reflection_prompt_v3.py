@@ -95,6 +95,12 @@ INPUT CONTEXT (READ-ONLY)
 #POLICY:
 <<POLICY_JSON>>
 
+#SELF_MODEL:
+<<SELF_MODEL_JSON>>
+
+#WORLD_MODEL:
+<<WORLD_MODEL_JSON>>
+
 Remember:
 - The downstream modules will parse your output strictly.
 - Any deviation from the required structure will be rejected.

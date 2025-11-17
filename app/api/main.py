@@ -396,10 +396,20 @@ def configure_supervisor(
         history_manager=history,
     )
     #reflection_runner = ReflectionRunner(actor_client, identity_profile=identity_profile)
-    reflection_runner = ReflectionRunnerV3(actor_client, identity_profile=identity_profile, policy=policy_config)
+    #reflection_runner = ReflectionRunnerV3(actor_client, identity_profile=identity_profile, policy=policy_config)
+
+    cortex_runner = CortexRunner(actor_client, history=history)
+    reflection_runner = ReflectionRunnerV3(
+        actor_client,
+        identity_profile=identity_profile,
+        policy=policy_config,
+        self_model=load_self_model(DATA_DIR / "self_model.json"),
+        world_model=load_world_model(DATA_DIR / "world_model.json"),
+        cortex_runner=cortex_runner,
+    )
     planner_runner = PlannerRunner(actor_client, identity=identity_profile, policy=policy_config)
     critic_runner = CriticRunner(critic_client, identity=identity_profile, policy=policy_config)
-    cortex_runner = CortexRunner(actor_client, history=history)
+
 
     supervisor = ReasoningSupervisor(
         reflection_runner=reflection_runner,
