@@ -184,7 +184,14 @@ class ReasoningSupervisor:
                 "output": plan.to_dict(),
             }
         )
-        critic_output = self.critic_runner.run_plan(plan, mode=reflection.mode)
+
+        critic_output = self.critic_runner.run(
+            reflection=reflection,
+            plan=plan,
+            tool_results=[],        # no tools executed yet at this stage
+            current_state=current_state,
+        )
+
         history.append(
             {
                 "type": "critic",

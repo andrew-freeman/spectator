@@ -102,13 +102,11 @@ class CriticOutput:
 
 @dataclass
 class GovernorDecision:
-    """Final arbitration outcome that dictates execution and response."""
-
     verdict: str
     rationale: str
     final_tool_calls: List[ToolCall]
-    response_type: Literal["text", "json"]
-    metadata: Dict[str, Any]
+    response_type: Literal["text", "json"] = "text"
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
