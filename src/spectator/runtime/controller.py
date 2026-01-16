@@ -5,6 +5,7 @@ from dataclasses import asdict
 
 from spectator.core.tracing import TraceEvent, TraceWriter
 from spectator.core.types import ChatMessage, State
+from spectator.runtime.capabilities import apply_permission_actions
 from spectator.runtime.checkpoints import load_or_create, save_checkpoint
 from spectator.runtime.notes import NotesPatch, extract_notes
 
@@ -39,6 +40,15 @@ def run_turn(session_id: str, user_text: str, backend) -> str:
     visible_text, patch = extract_notes(assistant_text)
     if patch is not None:
         _apply_notes_patch(checkpoint.state, patch)
+        if patch.actions:
+            action_report = apply_permission_actions(checkpoint.state, patch.actions)
+            writer.write(
+                TraceEvent(
+                    ts=time.time(),
+                    kind="actions",
+                    data={"role": "assistant", "actions": patch.actions, **action_report},
+                )
+            )
         writer.write(
             TraceEvent(
                 ts=time.time(),
