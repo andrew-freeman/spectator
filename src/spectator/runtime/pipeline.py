@@ -8,6 +8,7 @@ from spectator.core.telemetry import TelemetrySnapshot, collect_basic_telemetry
 from spectator.core.tracing import TraceEvent
 from spectator.core.types import Checkpoint, State
 from spectator.runtime.condense import CondensePolicy, condense_state, condense_upstream
+from spectator.runtime.memory_feedback import compute_memory_pressure, format_memory_feedback
 from spectator.runtime.notes import NotesPatch, extract_notes
 
 
@@ -18,6 +19,7 @@ class RoleSpec:
     params: dict[str, Any] = field(default_factory=dict)
     wants_retrieval: bool = False
     telemetry: str = "none"
+    memory_feedback: str = "none"
 
 
 @dataclass(slots=True)
@@ -61,6 +63,7 @@ def _compose_prompt(
     upstream: list[RoleResult],
     user_text: str,
     telemetry: TelemetrySnapshot | None,
+    memory_feedback: str | None,
 ) -> str:
     parts = [role.system_prompt, f"STATE:\n{_compact_state(state)}"]
     if telemetry is not None and role.telemetry == "basic":
@@ -77,6 +80,8 @@ def _compose_prompt(
             ]
         )
         parts.append(telemetry_text)
+    if memory_feedback:
+        parts.append(memory_feedback)
     if upstream:
         upstream_text = "\n".join(f"{result.role}: {result.text}" for result in upstream)
         parts.append(f"UPSTREAM:\n{upstream_text}")
@@ -95,7 +100,10 @@ def run_pipeline(
     condense_policy = CondensePolicy()
     role_list = list(roles)
     telemetry_roles = [role.name for role in role_list if role.telemetry == "basic"]
+    memory_feedback_roles = [role.name for role in role_list if role.memory_feedback == "basic"]
     telemetry_snapshot = collect_basic_telemetry() if telemetry_roles else None
+    last_report = None
+    memory_pressure_traced = False
     if tracer is not None and telemetry_snapshot is not None:
         tracer.write(
             TraceEvent(
@@ -140,7 +148,39 @@ def run_pipeline(
                 )
             results = condensed_upstream
 
-        prompt = _compose_prompt(role, checkpoint.state, results, user_text, telemetry_snapshot)
+        pressure = compute_memory_pressure(checkpoint.state, condense_policy, results, last_report)
+        if tracer is not None and memory_feedback_roles and not memory_pressure_traced:
+            tracer.write(
+                TraceEvent(
+                    ts=time.time(),
+                    kind="memory_pressure",
+                    data={
+                        "roles": memory_feedback_roles,
+                        "ratios": {
+                            "goals": pressure.goals_ratio,
+                            "open_loops": pressure.open_loops_ratio,
+                            "decisions": pressure.decisions_ratio,
+                            "constraints": pressure.constraints_ratio,
+                            "memory_tags": pressure.memory_tags_ratio,
+                            "upstream": pressure.upstream_ratio,
+                        },
+                        "high_fields": pressure.high_fields,
+                        "condensed": pressure.condensed,
+                    },
+                )
+            )
+            memory_pressure_traced = True
+        memory_feedback_block = (
+            format_memory_feedback(pressure) if role.memory_feedback == "basic" else None
+        )
+        prompt = _compose_prompt(
+            role,
+            checkpoint.state,
+            results,
+            user_text,
+            telemetry_snapshot,
+            memory_feedback_block,
+        )
         params = dict(role.params)
         params.setdefault("role", role.name)
         if tracer is not None:
@@ -165,6 +205,7 @@ def run_pipeline(
         if patch is not None:
             _apply_notes_patch(checkpoint.state, patch)
             report = condense_state(checkpoint.state, condense_policy)
+            last_report = report if report.trimmed else None
             if tracer is not None:
                 tracer.write(
                     TraceEvent(
