@@ -15,6 +15,7 @@ from spectator.runtime.notes import NotesPatch, extract_notes
 from spectator.runtime.tool_calls import extract_tool_calls
 from spectator.tools.executor import ToolExecutor
 from spectator.tools.results import ToolResult
+from spectator.memory.context import MemoryContext
 
 
 @dataclass(slots=True)
