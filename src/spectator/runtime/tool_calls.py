@@ -10,8 +10,9 @@ END_MARKER = "<<<END_TOOL_CALLS_JSON>>>"
 
 @dataclass(slots=True)
 class ToolCall:
-    name: str
-    arguments: dict[str, Any]
+    id: str
+    tool: str
+    args: dict[str, Any]
 
 
 def _extract_block(text: str) -> tuple[str | None, int, int]:
@@ -39,11 +40,12 @@ def _coerce_tool_calls(data: Any) -> list[ToolCall] | None:
 
     tool_calls: list[ToolCall] = []
     for item in items:
-        name = item.get("name")
-        arguments = item.get("arguments")
-        if not isinstance(name, str) or not isinstance(arguments, dict):
+        call_id = item.get("id")
+        tool = item.get("tool")
+        args = item.get("args")
+        if not isinstance(call_id, str) or not isinstance(tool, str) or not isinstance(args, dict):
             return None
-        tool_calls.append(ToolCall(name=name, arguments=arguments))
+        tool_calls.append(ToolCall(id=call_id, tool=tool, args=args))
     return tool_calls
 
 

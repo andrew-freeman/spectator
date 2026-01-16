@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -17,10 +18,14 @@ def _checkpoint_path(session_id: str, base_dir: Path | None = None) -> Path:
 def save_checkpoint(checkpoint: Checkpoint, base_dir: Path | None = None) -> Path:
     path = _checkpoint_path(checkpoint.session_id, base_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint.revision += 1
+    checkpoint.updated_ts = time.time()
     payload = asdict(checkpoint)
-    payload["updated_ts"] = checkpoint.updated_ts or time.time()
     temp_path = path.with_suffix(".json.tmp")
-    temp_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    with temp_path.open("w", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False))
+        handle.flush()
+        os.fsync(handle.fileno())
     temp_path.replace(path)
     return path
 
@@ -39,4 +44,18 @@ def load_latest(session_id: str, base_dir: Path | None = None) -> Checkpoint | N
         state=state,
         recent_messages=messages,
         trace_tail=payload.get("trace_tail", []),
+    )
+
+
+def load_or_create(session_id: str, base_dir: Path | None = None) -> Checkpoint:
+    checkpoint = load_latest(session_id, base_dir)
+    if checkpoint is not None:
+        return checkpoint
+    return Checkpoint(
+        session_id=session_id,
+        revision=0,
+        updated_ts=time.time(),
+        state=State(),
+        recent_messages=[],
+        trace_tail=[],
     )
