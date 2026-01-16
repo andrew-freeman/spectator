@@ -88,3 +88,46 @@ def test_pipeline_only_injects_telemetry_for_requested_roles() -> None:
 
     assert "=== TELEMETRY (basic) ===" not in backend.calls[0]["prompt"]
     assert "=== TELEMETRY (basic) ===" in backend.calls[1]["prompt"]
+
+
+def test_pipeline_injects_memory_feedback_for_enabled_roles() -> None:
+    checkpoint = Checkpoint(session_id="s-5", revision=0, updated_ts=0.0, state=State())
+    backend = FakeBackend()
+    backend.extend_role_responses("reflection", ["reflection output"])
+    backend.extend_role_responses("planner", ["planner output"])
+
+    roles = [
+        RoleSpec(name="reflection", system_prompt="Reflect.", memory_feedback="basic"),
+        RoleSpec(name="planner", system_prompt="Plan.", memory_feedback="none"),
+    ]
+
+    run_pipeline(checkpoint, "hello", roles, backend)
+
+    assert "=== MEMORY FEEDBACK ===" in backend.calls[0]["prompt"]
+    assert "=== MEMORY FEEDBACK ===" not in backend.calls[1]["prompt"]
+
+
+def test_pipeline_memory_feedback_marks_condensed_state() -> None:
+    checkpoint = Checkpoint(session_id="s-6", revision=0, updated_ts=0.0, state=State())
+    backend = FakeBackend()
+    goals = ",".join([f"\"goal-{idx}\"" for idx in range(40)])
+    backend.extend_role_responses(
+        "reflection",
+        [
+            "Draft.\n"
+            "<<<NOTES_JSON>>>\n"
+            f"{{\"set_goals\":[{goals}]}}\n"
+            "<<<END_NOTES_JSON>>>\n"
+        ],
+    )
+    backend.extend_role_responses("governor", ["final answer"])
+
+    roles = [
+        RoleSpec(name="reflection", system_prompt="Reflect.", memory_feedback="none"),
+        RoleSpec(name="governor", system_prompt="Decide.", memory_feedback="basic"),
+    ]
+
+    run_pipeline(checkpoint, "hello", roles, backend)
+
+    assert "=== MEMORY FEEDBACK ===" in backend.calls[1]["prompt"]
+    assert "condensed: true" in backend.calls[1]["prompt"]
