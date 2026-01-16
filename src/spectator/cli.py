@@ -1,0 +1,113 @@
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+from typing import Any
+
+from spectator.backends.fake import FakeBackend
+from spectator.runtime import controller
+from spectator.runtime.tool_calls import END_MARKER, START_MARKER
+
+
+class StdinBackend:
+    def __init__(self, show_prompt: bool = True) -> None:
+        self.show_prompt = show_prompt
+
+    def complete(self, prompt: str, params: dict[str, Any] | None = None) -> str:
+        params = params or {}
+        role = params.get("role", "assistant")
+        if self.show_prompt:
+            print(f"\n[{role}] prompt:\n{prompt}\n")
+        return input(f"[{role}] response> ")
+
+
+def _build_smoke_backend() -> FakeBackend:
+    tool_calls = [{"id": "t1", "tool": "fs.list_dir", "args": {"path": "."}}]
+    response_1 = (
+        "Need to inspect the sandbox.\n"
+        f"{START_MARKER}\n"
+        f"{json.dumps(tool_calls)}\n"
+        f"{END_MARKER}\n"
+    )
+    response_2 = "Smoke run complete."
+    backend = FakeBackend()
+    backend.extend_role_responses("reflection", ["Noted."])
+    backend.extend_role_responses("planner", ["Plan drafted."])
+    backend.extend_role_responses("critic", ["Looks good."])
+    backend.extend_role_responses("governor", [response_1, response_2])
+    return backend
+
+
+def _run_command(args: argparse.Namespace) -> int:
+    backend = StdinBackend()
+    final_text = controller.run_turn(args.session, args.text, backend)
+    print(final_text)
+    return 0
+
+
+def _repl_command(args: argparse.Namespace) -> int:
+    backend = StdinBackend()
+    session_id = args.session
+    while True:
+        try:
+            line = input("> ")
+        except EOFError:
+            break
+        if line.strip() == "/exit":
+            break
+        if not line.strip():
+            continue
+        final_text = controller.run_turn(session_id, line, backend)
+        print(final_text)
+    return 0
+
+
+def _smoke_command(args: argparse.Namespace) -> int:
+    session_id = args.session
+    base_dir = Path("data") / "smoke"
+    sandbox_root = base_dir / "sandbox"
+    sandbox_root.mkdir(parents=True, exist_ok=True)
+    (sandbox_root / "hello.txt").write_text("hello", encoding="utf-8")
+
+    backend = _build_smoke_backend()
+    final_text = controller.run_turn(session_id, "Hello", backend, base_dir=base_dir)
+
+    checkpoint_path = base_dir / "checkpoints" / f"{session_id}.json"
+    trace_path = base_dir / "traces" / f"{session_id}.jsonl"
+
+    print("Smoke run complete.")
+    print(f"Final answer: {final_text}")
+    print(f"Checkpoint saved: {checkpoint_path}")
+    print(f"Trace file: {trace_path}")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="spectator")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    run_parser = subparsers.add_parser("run", help="Run a single turn")
+    run_parser.add_argument("--session", default="demo-1")
+    run_parser.add_argument("--text", required=True)
+    run_parser.set_defaults(func=_run_command)
+
+    repl_parser = subparsers.add_parser("repl", help="Run an interactive REPL")
+    repl_parser.add_argument("--session", default="demo-1")
+    repl_parser.set_defaults(func=_repl_command)
+
+    smoke_parser = subparsers.add_parser("smoke", help="Run the smoke demo")
+    smoke_parser.add_argument("--session", default="smoke-1")
+    smoke_parser.set_defaults(func=_smoke_command)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
