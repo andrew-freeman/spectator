@@ -97,7 +97,7 @@ def run_pipeline(
     user_text: str,
     roles: Iterable[RoleSpec],
     backend,
-    memory: Any | None = None,
+    memory: MemoryContext | None = None,
     tracer=None,
 ) -> tuple[str, list[RoleResult], Checkpoint]:
     results: list[RoleResult] = []
