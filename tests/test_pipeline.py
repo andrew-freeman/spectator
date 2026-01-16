@@ -1,5 +1,7 @@
 from spectator.backends.fake import FakeBackend
 from spectator.core.types import Checkpoint, State
+from spectator.memory.embeddings import HashEmbedder
+from spectator.memory.vector_store import MemoryRecord, SQLiteVectorStore
 from spectator.runtime.pipeline import RoleSpec, run_pipeline
 
 
@@ -131,3 +133,45 @@ def test_pipeline_memory_feedback_marks_condensed_state() -> None:
 
     assert "=== MEMORY FEEDBACK ===" in backend.calls[1]["prompt"]
     assert "condensed: true" in backend.calls[1]["prompt"]
+
+
+def test_pipeline_injects_retrieval_block_for_enabled_roles(tmp_path) -> None:
+    checkpoint = Checkpoint(session_id="s-7", revision=0, updated_ts=0.0, state=State())
+    backend = FakeBackend()
+    backend.extend_role_responses("reflection", ["reflection output"])
+    backend.extend_role_responses("planner", ["planner output"])
+
+    roles = [
+        RoleSpec(name="reflection", system_prompt="Reflect.", wants_retrieval=True),
+        RoleSpec(name="planner", system_prompt="Plan.", wants_retrieval=False),
+    ]
+
+    store = SQLiteVectorStore(tmp_path / "memory.sqlite")
+    embedder = HashEmbedder(dim=32)
+    record = MemoryRecord(id="mem-1", ts=1.0, text="remember this detail")
+    store.add([record], embedder.embed([record.text]))
+    memory = type("Memory", (), {"store": store, "embedder": embedder})()
+
+    run_pipeline(checkpoint, "remember this detail", roles, backend, memory=memory)
+
+    assert "=== RETRIEVAL ===" in backend.calls[0]["prompt"]
+    assert "=== END RETRIEVAL ===" in backend.calls[0]["prompt"]
+    assert "=== RETRIEVAL ===" not in backend.calls[1]["prompt"]
+
+
+def test_pipeline_omits_retrieval_block_without_request(tmp_path) -> None:
+    checkpoint = Checkpoint(session_id="s-8", revision=0, updated_ts=0.0, state=State())
+    backend = FakeBackend()
+    backend.extend_role_responses("reflection", ["reflection output"])
+
+    roles = [RoleSpec(name="reflection", system_prompt="Reflect.", wants_retrieval=False)]
+
+    store = SQLiteVectorStore(tmp_path / "memory.sqlite")
+    embedder = HashEmbedder(dim=32)
+    record = MemoryRecord(id="mem-2", ts=1.0, text="memory text")
+    store.add([record], embedder.embed([record.text]))
+    memory = type("Memory", (), {"store": store, "embedder": embedder})()
+
+    run_pipeline(checkpoint, "memory text", roles, backend, memory=memory)
+
+    assert "=== RETRIEVAL ===" not in backend.calls[0]["prompt"]
