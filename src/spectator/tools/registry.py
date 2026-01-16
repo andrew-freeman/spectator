@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-ToolHandler = Callable[[dict[str, Any]], Any]
+ToolHandler = Callable[..., Any]
 
 
 @dataclass(slots=True)
