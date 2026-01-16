@@ -4,6 +4,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable
 
+from spectator.core.telemetry import TelemetrySnapshot, collect_basic_telemetry
 from spectator.core.tracing import TraceEvent
 from spectator.core.types import Checkpoint, State
 from spectator.runtime.notes import NotesPatch, extract_notes
@@ -15,6 +16,7 @@ class RoleSpec:
     system_prompt: str
     params: dict[str, Any] = field(default_factory=dict)
     wants_retrieval: bool = False
+    telemetry: str = "none"
 
 
 @dataclass(slots=True)
@@ -57,8 +59,23 @@ def _compose_prompt(
     state: State,
     upstream: list[RoleResult],
     user_text: str,
+    telemetry: TelemetrySnapshot | None,
 ) -> str:
     parts = [role.system_prompt, f"STATE:\n{_compact_state(state)}"]
+    if telemetry is not None and role.telemetry == "basic":
+        telemetry_text = "\n".join(
+            [
+                "=== TELEMETRY (basic) ===",
+                f"ts: {telemetry.ts}",
+                f"pid: {telemetry.pid}",
+                f"platform: {telemetry.platform}",
+                f"python: {telemetry.python}",
+                f"ram_total_mb: {telemetry.ram_total_mb}",
+                f"ram_avail_mb: {telemetry.ram_avail_mb}",
+                "=== END TELEMETRY ===",
+            ]
+        )
+        parts.append(telemetry_text)
     if upstream:
         upstream_text = "\n".join(f"{result.role}: {result.text}" for result in upstream)
         parts.append(f"UPSTREAM:\n{upstream_text}")
@@ -74,8 +91,23 @@ def run_pipeline(
     tracer=None,
 ) -> tuple[str, list[RoleResult], Checkpoint]:
     results: list[RoleResult] = []
-    for role in roles:
-        prompt = _compose_prompt(role, checkpoint.state, results, user_text)
+    role_list = list(roles)
+    telemetry_roles = [role.name for role in role_list if role.telemetry == "basic"]
+    telemetry_snapshot = collect_basic_telemetry() if telemetry_roles else None
+    if tracer is not None and telemetry_snapshot is not None:
+        tracer.write(
+            TraceEvent(
+                ts=time.time(),
+                kind="telemetry",
+                data={
+                    "roles": telemetry_roles,
+                    "snapshot": asdict(telemetry_snapshot),
+                },
+            )
+        )
+
+    for role in role_list:
+        prompt = _compose_prompt(role, checkpoint.state, results, user_text, telemetry_snapshot)
         params = dict(role.params)
         params.setdefault("role", role.name)
         if tracer is not None:
