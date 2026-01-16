@@ -126,6 +126,7 @@ def run_pipeline(
                         "k": 5,
                         "count": len(retrieval_results),
                         "ids": [record.id for record, _score in retrieval_results],
+                        "scores": [score for _record, score in retrieval_results],
                     },
                 )
             )
