@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable
@@ -10,6 +11,9 @@ from spectator.core.types import Checkpoint, State
 from spectator.runtime.condense import CondensePolicy, condense_state, condense_upstream
 from spectator.runtime.memory_feedback import compute_memory_pressure, format_memory_feedback
 from spectator.runtime.notes import NotesPatch, extract_notes
+from spectator.runtime.tool_calls import extract_tool_calls
+from spectator.tools.executor import ToolExecutor
+from spectator.tools.results import ToolResult
 
 
 @dataclass(slots=True)
@@ -57,6 +61,11 @@ def _apply_notes_patch(state: State, patch: NotesPatch) -> None:
         _extend_unique(state.memory_tags, patch.add_memory_tags)
 
 
+def _format_tool_results(results: list[ToolResult]) -> str:
+    lines = [json.dumps(asdict(result), ensure_ascii=False) for result in results]
+    return "TOOL_RESULTS:\n" + "\n".join(lines)
+
+
 def _compose_prompt(
     role: RoleSpec,
     state: State,
@@ -98,6 +107,8 @@ def run_pipeline(
     roles: Iterable[RoleSpec],
     backend,
     memory: MemoryContext | None = None,
+    tool_executor: ToolExecutor | None = None,
+    max_tool_rounds: int = 2,
     tracer=None,
 ) -> tuple[str, list[RoleResult], Checkpoint]:
     results: list[RoleResult] = []
@@ -210,25 +221,89 @@ def run_pipeline(
         )
         params = dict(role.params)
         params.setdefault("role", role.name)
-        if tracer is not None:
-            tracer.write(
-                TraceEvent(
-                    ts=time.time(),
-                    kind="llm_req",
-                    data={"role": role.name, "prompt": prompt},
+        def _complete(request_prompt: str) -> str:
+            if tracer is not None:
+                tracer.write(
+                    TraceEvent(
+                        ts=time.time(),
+                        kind="llm_req",
+                        data={"role": role.name, "prompt": request_prompt},
+                    )
                 )
-            )
-        response = backend.complete(prompt, params=params)
-        if tracer is not None:
-            tracer.write(
-                TraceEvent(
-                    ts=time.time(),
-                    kind="llm_done",
-                    data={"role": role.name, "response": response},
+            completion = backend.complete(request_prompt, params=params)
+            if tracer is not None:
+                tracer.write(
+                    TraceEvent(
+                        ts=time.time(),
+                        kind="llm_done",
+                        data={"role": role.name, "response": completion},
+                    )
                 )
-            )
+            return completion
 
-        visible_text, patch = extract_notes(response)
+        response = _complete(prompt)
+        final_response = response
+        if role.name == "governor" and max_tool_rounds > 1:
+            visible_text, tool_calls = extract_tool_calls(response)
+            if tool_calls and tool_executor is not None:
+                if tracer is not None:
+                    tracer.write(
+                        TraceEvent(
+                            ts=time.time(),
+                            kind="tool_plan",
+                            data={
+                                "role": role.name,
+                                "calls": [{"id": call.id, "tool": call.tool} for call in tool_calls],
+                            },
+                        )
+                    )
+                tool_results: list[ToolResult] = []
+                for call in tool_calls:
+                    if tracer is not None:
+                        tracer.write(
+                            TraceEvent(
+                                ts=time.time(),
+                                kind="tool_start",
+                                data={"role": role.name, "id": call.id, "tool": call.tool},
+                            )
+                        )
+                    result = tool_executor.execute_calls([call])[0]
+                    tool_results.append(result)
+                    if tracer is not None:
+                        tracer.write(
+                            TraceEvent(
+                                ts=time.time(),
+                                kind="tool_done",
+                                data={
+                                    "role": role.name,
+                                    "id": result.id,
+                                    "tool": result.tool,
+                                    "ok": result.ok,
+                                    "error": result.error,
+                                },
+                            )
+                        )
+                tool_results_block = _format_tool_results(tool_results)
+                response = _complete(f"{prompt}\n\n{tool_results_block}")
+                final_response, ignored_calls = extract_tool_calls(response)
+                if ignored_calls and tracer is not None:
+                    tracer.write(
+                        TraceEvent(
+                            ts=time.time(),
+                            kind="tool_plan",
+                            data={
+                                "role": role.name,
+                                "ignored": True,
+                                "calls": [
+                                    {"id": call.id, "tool": call.tool} for call in ignored_calls
+                                ],
+                            },
+                        )
+                    )
+            else:
+                final_response = visible_text
+
+        visible_text, patch = extract_notes(final_response)
         if patch is not None:
             _apply_notes_patch(checkpoint.state, patch)
             report = condense_state(checkpoint.state, condense_policy)
