@@ -16,3 +16,11 @@ Alternatively, use the Makefile shortcut:
 ```bash
 make test
 ```
+
+## Smoke run
+
+Run the end-to-end smoke script:
+
+```bash
+python scripts/smoke_run.py
+```
