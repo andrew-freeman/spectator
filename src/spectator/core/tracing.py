@@ -8,8 +8,8 @@ from typing import Any
 
 @dataclass(slots=True)
 class TraceEvent:
-    event_type: str
     ts: float
+    kind: str
     data: dict[str, Any] = field(default_factory=dict)
 
 
