@@ -4,8 +4,10 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable
 
+from spectator.core.telemetry import TelemetrySnapshot, collect_basic_telemetry
 from spectator.core.tracing import TraceEvent
 from spectator.core.types import Checkpoint, State
+from spectator.runtime.condense import CondensePolicy, condense_state, condense_upstream
 from spectator.runtime.notes import NotesPatch, extract_notes
 
 
@@ -15,6 +17,7 @@ class RoleSpec:
     system_prompt: str
     params: dict[str, Any] = field(default_factory=dict)
     wants_retrieval: bool = False
+    telemetry: str = "none"
 
 
 @dataclass(slots=True)
@@ -57,8 +60,23 @@ def _compose_prompt(
     state: State,
     upstream: list[RoleResult],
     user_text: str,
+    telemetry: TelemetrySnapshot | None,
 ) -> str:
     parts = [role.system_prompt, f"STATE:\n{_compact_state(state)}"]
+    if telemetry is not None and role.telemetry == "basic":
+        telemetry_text = "\n".join(
+            [
+                "=== TELEMETRY (basic) ===",
+                f"ts: {telemetry.ts}",
+                f"pid: {telemetry.pid}",
+                f"platform: {telemetry.platform}",
+                f"python: {telemetry.python}",
+                f"ram_total_mb: {telemetry.ram_total_mb}",
+                f"ram_avail_mb: {telemetry.ram_avail_mb}",
+                "=== END TELEMETRY ===",
+            ]
+        )
+        parts.append(telemetry_text)
     if upstream:
         upstream_text = "\n".join(f"{result.role}: {result.text}" for result in upstream)
         parts.append(f"UPSTREAM:\n{upstream_text}")
@@ -74,8 +92,55 @@ def run_pipeline(
     tracer=None,
 ) -> tuple[str, list[RoleResult], Checkpoint]:
     results: list[RoleResult] = []
-    for role in roles:
-        prompt = _compose_prompt(role, checkpoint.state, results, user_text)
+    condense_policy = CondensePolicy()
+    role_list = list(roles)
+    telemetry_roles = [role.name for role in role_list if role.telemetry == "basic"]
+    telemetry_snapshot = collect_basic_telemetry() if telemetry_roles else None
+    if tracer is not None and telemetry_snapshot is not None:
+        tracer.write(
+            TraceEvent(
+                ts=time.time(),
+                kind="telemetry",
+                data={
+                    "roles": telemetry_roles,
+                    "snapshot": asdict(telemetry_snapshot),
+                },
+            )
+        )
+
+    for role in role_list:
+        if results:
+            before_lengths = [len(result.text) for result in results]
+            condensed_upstream = condense_upstream(results, condense_policy)
+            after_lengths = [len(result.text) for result in condensed_upstream]
+            if tracer is not None and sum(after_lengths) < sum(before_lengths):
+                tracer.write(
+                    TraceEvent(
+                        ts=time.time(),
+                        kind="condense",
+                        data={
+                            "scope": "upstream",
+                            "role": role.name,
+                            "report": {
+                                "before_total_chars": sum(before_lengths),
+                                "after_total_chars": sum(after_lengths),
+                                "per_role": [
+                                    {
+                                        "role": result.role,
+                                        "before_chars": before_len,
+                                        "after_chars": after_len,
+                                    }
+                                    for result, before_len, after_len in zip(
+                                        results, before_lengths, after_lengths
+                                    )
+                                ],
+                            },
+                        },
+                    )
+                )
+            results = condensed_upstream
+
+        prompt = _compose_prompt(role, checkpoint.state, results, user_text, telemetry_snapshot)
         params = dict(role.params)
         params.setdefault("role", role.name)
         if tracer is not None:
@@ -99,6 +164,7 @@ def run_pipeline(
         visible_text, patch = extract_notes(response)
         if patch is not None:
             _apply_notes_patch(checkpoint.state, patch)
+            report = condense_state(checkpoint.state, condense_policy)
             if tracer is not None:
                 tracer.write(
                     TraceEvent(
@@ -107,6 +173,18 @@ def run_pipeline(
                         data={"role": role.name, **asdict(patch)},
                     )
                 )
+                if report.trimmed:
+                    tracer.write(
+                        TraceEvent(
+                            ts=time.time(),
+                            kind="condense",
+                            data={
+                                "scope": "state",
+                                "role": role.name,
+                                "report": asdict(report),
+                            },
+                        )
+                    )
         results.append(RoleResult(role=role.name, text=visible_text, notes=patch))
 
     final_text = results[-1].text if results else ""
