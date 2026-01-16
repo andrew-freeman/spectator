@@ -14,6 +14,7 @@ class ToolResult:
     ok: bool
     output: Any | None
     error: str | None
+    metadata: dict[str, Any] | None = None
 
     def to_tool_message(self) -> ChatMessage:
         payload = {

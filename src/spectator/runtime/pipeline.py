@@ -267,20 +267,23 @@ def run_pipeline(
                                 data={"role": role.name, "id": call.id, "tool": call.tool},
                             )
                         )
-                    result = tool_executor.execute_calls([call])[0]
+                    result = tool_executor.execute_calls([call], checkpoint.state)[0]
                     tool_results.append(result)
                     if tracer is not None:
+                        data = {
+                            "role": role.name,
+                            "id": result.id,
+                            "tool": result.tool,
+                            "ok": result.ok,
+                            "error": result.error,
+                        }
+                        if result.metadata:
+                            data.update(result.metadata)
                         tracer.write(
                             TraceEvent(
                                 ts=time.time(),
                                 kind="tool_done",
-                                data={
-                                    "role": role.name,
-                                    "id": result.id,
-                                    "tool": result.tool,
-                                    "ok": result.ok,
-                                    "error": result.error,
-                                },
+                                data=data,
                             )
                         )
                 tool_results_block = _format_tool_results(tool_results)
