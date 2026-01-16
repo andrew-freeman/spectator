@@ -64,6 +64,7 @@ def _compose_prompt(
     user_text: str,
     telemetry: TelemetrySnapshot | None,
     memory_feedback: str | None,
+    retrieval_block: str | None,
 ) -> str:
     parts = [role.system_prompt, f"STATE:\n{_compact_state(state)}"]
     if telemetry is not None and role.telemetry == "basic":
@@ -82,6 +83,8 @@ def _compose_prompt(
         parts.append(telemetry_text)
     if memory_feedback:
         parts.append(memory_feedback)
+    if retrieval_block and role.wants_retrieval:
+        parts.append(retrieval_block)
     if upstream:
         upstream_text = "\n".join(f"{result.role}: {result.text}" for result in upstream)
         parts.append(f"UPSTREAM:\n{upstream_text}")
@@ -94,6 +97,7 @@ def run_pipeline(
     user_text: str,
     roles: Iterable[RoleSpec],
     backend,
+    memory: Any | None = None,
     tracer=None,
 ) -> tuple[str, list[RoleResult], Checkpoint]:
     results: list[RoleResult] = []
@@ -104,6 +108,27 @@ def run_pipeline(
     telemetry_snapshot = collect_basic_telemetry() if telemetry_roles else None
     last_report = None
     memory_pressure_traced = False
+    retrieval_block = None
+    retrieval_roles = [role.name for role in role_list if role.wants_retrieval]
+    if memory is not None and retrieval_roles:
+        from spectator.memory.retrieval import format_retrieval_block, retrieve
+
+        query_text = f"{user_text}\nSTATE:{_compact_state(checkpoint.state)}"
+        retrieval_results = retrieve(query_text, memory.store, memory.embedder, top_k=5)
+        retrieval_block = format_retrieval_block(retrieval_results)
+        if tracer is not None:
+            tracer.write(
+                TraceEvent(
+                    ts=time.time(),
+                    kind="retrieval",
+                    data={
+                        "roles": retrieval_roles,
+                        "k": 5,
+                        "count": len(retrieval_results),
+                        "ids": [record.id for record, _score in retrieval_results],
+                    },
+                )
+            )
     if tracer is not None and telemetry_snapshot is not None:
         tracer.write(
             TraceEvent(
@@ -180,6 +205,7 @@ def run_pipeline(
             user_text,
             telemetry_snapshot,
             memory_feedback_block,
+            retrieval_block,
         )
         params = dict(role.params)
         params.setdefault("role", role.name)
