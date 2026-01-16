@@ -75,7 +75,6 @@ Payload format:
   "add_memory_tags": ["..."],
   "actions": ["condense_now", "condense_smart", "request_permission:net:huggingface.co"]
 }
-````
 
 Rules:
 
