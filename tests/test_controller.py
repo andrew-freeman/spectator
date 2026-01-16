@@ -4,15 +4,7 @@ from spectator.backends.fake import FakeBackend
 from spectator.runtime import checkpoints, controller
 
 
-def test_run_turn_smoke(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(checkpoints, "DEFAULT_DIR", tmp_path / "checkpoints")
-
-    class LocalTraceWriter(controller.TraceWriter):
-        def __init__(self, session_id: str, base_dir=None) -> None:
-            super().__init__(session_id, base_dir=tmp_path / "traces")
-
-    monkeypatch.setattr(controller, "TraceWriter", LocalTraceWriter)
-
+def test_run_turn_smoke(tmp_path: Path) -> None:
     backend = FakeBackend()
     backend.extend_role_responses(
         "reflection",
@@ -28,7 +20,7 @@ def test_run_turn_smoke(tmp_path: Path, monkeypatch) -> None:
     backend.extend_role_responses("critic", ["critique"])
     backend.extend_role_responses("governor", ["final answer"])
 
-    reply = controller.run_turn("session-4", "hi", backend)
+    reply = controller.run_turn("session-4", "hi", backend, base_dir=tmp_path)
 
     assert reply == "final answer"
     checkpoint = checkpoints.load_latest("session-4", base_dir=tmp_path / "checkpoints")
