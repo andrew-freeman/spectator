@@ -8,6 +8,7 @@ from typing import Any, Iterable
 from spectator.core.telemetry import TelemetrySnapshot, collect_basic_telemetry
 from spectator.core.tracing import TraceEvent
 from spectator.core.types import Checkpoint, State
+from spectator.runtime.capabilities import apply_permission_actions
 from spectator.runtime.condense import CondensePolicy, condense_state, condense_upstream
 from spectator.runtime.memory_feedback import compute_memory_pressure, format_memory_feedback
 from spectator.runtime.notes import NotesPatch, extract_notes
@@ -309,6 +310,16 @@ def run_pipeline(
         visible_text, patch = extract_notes(final_response)
         if patch is not None:
             _apply_notes_patch(checkpoint.state, patch)
+            if patch.actions:
+                action_report = apply_permission_actions(checkpoint.state, patch.actions)
+                if tracer is not None:
+                    tracer.write(
+                        TraceEvent(
+                            ts=time.time(),
+                            kind="actions",
+                            data={"role": role.name, "actions": patch.actions, **action_report},
+                        )
+                    )
             report = condense_state(checkpoint.state, condense_policy)
             last_report = report if report.trimmed else None
             if tracer is not None:
