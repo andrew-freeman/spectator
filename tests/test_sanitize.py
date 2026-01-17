@@ -38,7 +38,7 @@ def test_sanitize_strips_state_only_output() -> None:
 
 
 def test_sanitize_strips_history_only_output() -> None:
-    text = "HISTORY:\n{...}"
+    text = "HISTORY_JSON:\n[{\"role\": \"user\", \"content\": \"hi\"}]"
     assert sanitize_visible_text(text) == "..."
 
 
@@ -48,7 +48,17 @@ def test_sanitize_strips_trailing_state_block() -> None:
 
 
 def test_sanitize_strips_trailing_history_block() -> None:
-    text = "Hello\n\nHISTORY:\n{...}"
+    text = "Hello\n\nHISTORY_JSON:\n[{\"role\": \"user\", \"content\": \"hi\"}]"
+    assert sanitize_visible_text(text) == "Hello"
+
+
+def test_sanitize_strips_leading_role_transcript_block() -> None:
+    text = "reflection:\nThoughts\n\nHello"
+    assert sanitize_visible_text(text) == "Hello"
+
+
+def test_sanitize_strips_trailing_role_transcript_block() -> None:
+    text = "Hello\n\nassistant:\nOops"
     assert sanitize_visible_text(text) == "Hello"
 
 

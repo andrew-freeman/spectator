@@ -208,7 +208,7 @@ def test_pipeline_strips_tool_and_notes_blocks_before_tracing(tmp_path) -> None:
     backend.extend_role_responses(
         "governor",
         [
-            "HISTORY:\nuser: hi\n\nVisible answer.\n"
+            "HISTORY_JSON:\n[{\"role\":\"user\",\"content\":\"hi\"}]\n\nVisible answer.\n"
             "<<<TOOL_CALLS_JSON>>>\n"
             "[{\"id\":\"call-1\",\"tool\":\"search\",\"args\":{\"q\":\"hello\"}}]\n"
             "<<<END_TOOL_CALLS_JSON>>>\n"
@@ -226,7 +226,7 @@ def test_pipeline_strips_tool_and_notes_blocks_before_tracing(tmp_path) -> None:
 
     assert "TOOL_CALLS_JSON" not in final_text
     assert "NOTES_JSON" not in final_text
-    assert "HISTORY:" not in final_text
+    assert "HISTORY_JSON:" not in final_text
     assert final_text.strip() == "Visible answer."
     assert results[0].text.strip() == "Visible answer."
     assert updated.state.goals == ["ship"]
@@ -240,7 +240,7 @@ def test_pipeline_strips_tool_and_notes_blocks_before_tracing(tmp_path) -> None:
     visible_output = visible_events[0]["data"]["visible_response"]
     assert "TOOL_CALLS_JSON" not in visible_output
     assert "NOTES_JSON" not in visible_output
-    assert "HISTORY:" not in visible_output
+    assert "HISTORY_JSON:" not in visible_output
 
 
 def test_pipeline_traces_streaming_deltas(tmp_path) -> None:
@@ -298,8 +298,13 @@ def test_pipeline_includes_history_block_when_messages_present() -> None:
     run_pipeline(checkpoint, "hello", roles, backend)
 
     prompt = backend.calls[0]["prompt"]
-    assert "HISTORY:\nuser: Hello\nassistant: Hi there" in prompt
-    assert prompt.count("HISTORY:") == 1
+    assert "HISTORY_JSON:\n" in prompt
+    history_block = prompt.split("HISTORY_JSON:\n", 1)[1].split("\n\n", 1)[0]
+    assert json.loads(history_block) == [
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": "Hi there"},
+    ]
+    assert prompt.count("HISTORY_JSON:") == 1
 
 
 def test_pipeline_includes_empty_history_instruction_when_absent() -> None:
@@ -312,6 +317,6 @@ def test_pipeline_includes_empty_history_instruction_when_absent() -> None:
     run_pipeline(checkpoint, "hello", roles, backend)
 
     prompt = backend.calls[0]["prompt"]
-    assert "If HISTORY is empty, say so and ask for context." in prompt
-    assert "HISTORY:\n(empty)" in prompt
-    assert prompt.count("HISTORY:") == 1
+    assert "If HISTORY_JSON is empty, say so and ask for context." in prompt
+    assert "HISTORY_JSON:\n[]" in prompt
+    assert prompt.count("HISTORY_JSON:") == 1
