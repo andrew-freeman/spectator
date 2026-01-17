@@ -25,6 +25,14 @@ Run the end-to-end smoke script:
 python scripts/smoke_run.py
 ```
 
+## Soak run
+
+Run the synthetic soak-test harness (not executed by pytest):
+
+```bash
+python scripts/soak_run.py --turns 10000 --seed 42
+```
+
 ## CLI usage
 
 Run a single turn (defaults to session `demo-1`):
