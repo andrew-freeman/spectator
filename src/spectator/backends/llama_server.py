@@ -53,6 +53,7 @@ class LlamaServerBackend:
     def _build_payload(self, prompt: str, params: dict[str, Any]) -> dict[str, Any]:
         options = dict(params)
         options.pop("role", None)
+        options.pop("stream_callback", None)
         messages = options.pop("messages", None)
         model = options.pop("model", self.model)
         if messages is None:
@@ -106,6 +107,7 @@ class LlamaServerBackend:
         params = params or {}
         payload = self._build_payload(prompt, params)
         stream = bool(payload.get("stream"))
+        stream_callback = params.get("stream_callback")
         url = f"{self.base_url.rstrip('/')}/v1/chat/completions"
 
         if not stream:
@@ -137,6 +139,8 @@ class LlamaServerBackend:
                         delta = first["text"]
             if delta:
                 raw_parts.append(delta)
+                if callable(stream_callback):
+                    stream_callback(delta)
         return "".join(raw_parts)
 
 

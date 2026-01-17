@@ -1,8 +1,11 @@
+import json
+
 from spectator.backends.fake import FakeBackend
 from spectator.core.tracing import TraceWriter
-from spectator.core.types import Checkpoint, State
+from spectator.core.types import ChatMessage, Checkpoint, State
 from spectator.memory.embeddings import HashEmbedder
 from spectator.memory.vector_store import MemoryRecord, SQLiteVectorStore
+from spectator.prompts import get_role_prompt
 from spectator.runtime.pipeline import RoleSpec, run_pipeline
 
 
@@ -197,3 +200,77 @@ def test_pipeline_traces_visible_response(tmp_path) -> None:
     assert "<think>secret</think>Visible" in llm_done
     assert '"visible_response": "Visible"' in visible_response
     assert final_text == "Visible"
+
+
+def test_pipeline_traces_streaming_deltas(tmp_path) -> None:
+    class StreamingBackend:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def complete(self, prompt: str, params: dict[str, object] | None = None) -> str:
+            params = params or {}
+            self.calls.append({"prompt": prompt, "params": params})
+            deltas = ["alpha ", "beta ", "gamma "]
+            callback = params.get("stream_callback")
+            if params.get("stream") and callable(callback):
+                for delta in deltas:
+                    callback(delta)
+            return "".join(deltas) + "done"
+
+    checkpoint = Checkpoint(session_id="s-10", revision=0, updated_ts=0.0, state=State())
+    backend = StreamingBackend()
+    roles = [RoleSpec(name="governor", system_prompt="Decide.", params={"stream": True})]
+    tracer = TraceWriter("session-10", base_dir=tmp_path / "traces")
+
+    run_pipeline(checkpoint, "hello", roles, backend, tracer=tracer)
+
+    events = [
+        json.loads(line)
+        for line in tracer.path.read_text(encoding="utf-8").strip().splitlines()
+    ]
+    stream_events = [event for event in events if event["kind"] == "llm_stream"]
+    assert [event["data"]["delta"] for event in stream_events] == [
+        "alpha ",
+        "beta ",
+        "gamma ",
+    ]
+    kinds = [event["kind"] for event in events]
+    assert kinds.index("llm_req") < kinds.index("llm_stream") < kinds.index("llm_done")
+
+
+def test_pipeline_includes_history_block_when_messages_present() -> None:
+    checkpoint = Checkpoint(
+        session_id="s-11",
+        revision=0,
+        updated_ts=0.0,
+        state=State(),
+        recent_messages=[
+            ChatMessage(role="user", content="Hello"),
+            ChatMessage(role="assistant", content="Hi there"),
+        ],
+    )
+    backend = FakeBackend()
+    backend.extend_role_responses("reflection", ["reflection output"])
+
+    roles = [RoleSpec(name="reflection", system_prompt=get_role_prompt("reflection"))]
+
+    run_pipeline(checkpoint, "hello", roles, backend)
+
+    prompt = backend.calls[0]["prompt"]
+    assert "HISTORY:\nuser: Hello\nassistant: Hi there" in prompt
+    assert prompt.count("HISTORY:") == 1
+
+
+def test_pipeline_includes_empty_history_instruction_when_absent() -> None:
+    checkpoint = Checkpoint(session_id="s-12", revision=0, updated_ts=0.0, state=State())
+    backend = FakeBackend()
+    backend.extend_role_responses("reflection", ["reflection output"])
+
+    roles = [RoleSpec(name="reflection", system_prompt=get_role_prompt("reflection"))]
+
+    run_pipeline(checkpoint, "hello", roles, backend)
+
+    prompt = backend.calls[0]["prompt"]
+    assert "If HISTORY is empty, say so and ask for context." in prompt
+    assert "HISTORY:\n(empty)" in prompt
+    assert prompt.count("HISTORY:") == 1
