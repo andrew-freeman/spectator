@@ -14,13 +14,18 @@ class TraceEvent:
 
 
 class TraceWriter:
-    def __init__(self, session_id: str, base_dir: Path | None = None) -> None:
+    def __init__(
+        self, session_id: str, base_dir: Path | None = None, run_id: str | None = None
+    ) -> None:
         self.session_id = session_id
         self.base_dir = base_dir or Path("data") / "traces"
+        self.run_id = run_id
 
     @property
     def path(self) -> Path:
-        return self.base_dir / f"{self.session_id}.jsonl"
+        if self.run_id is None:
+            return self.base_dir / f"{self.session_id}.jsonl"
+        return self.base_dir / f"{self.session_id}__{self.run_id}.jsonl"
 
     def write(self, event: TraceEvent) -> Path:
         self.path.parent.mkdir(parents=True, exist_ok=True)
