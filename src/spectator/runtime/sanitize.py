@@ -21,6 +21,7 @@ _REASONING_PATTERNS = [
 ]
 
 _SCAFFOLD_HEADERS = {
+    "HISTORY:": "HISTORY",
     "STATE:": "STATE",
     "UPSTREAM:": "UPSTREAM",
     "USER:": "USER",
@@ -98,6 +99,17 @@ def _strip_trailing_scaffolding(text: str) -> tuple[str, list[str]]:
             return working, removed
 
 
+def _strip_dangling_markers(text: str) -> tuple[str, bool]:
+    """Remove stray tool/notes markers that are not part of protected blocks."""
+    sanitized = text
+    removed = False
+    for marker in (TOOLS_START, TOOLS_END, NOTES_START, NOTES_END):
+        if marker in sanitized:
+            sanitized = sanitized.replace(marker, "")
+            removed = True
+    return sanitized, removed
+
+
 def sanitize_visible_text_with_report(text: str) -> tuple[str, list[str], bool]:
     if not text:
         return text, [], False
@@ -117,12 +129,15 @@ def sanitize_visible_text_with_report(text: str) -> tuple[str, list[str], bool]:
     sanitized = _strip_reasoning_wrappers(protected)
     sanitized, leading_removed = _strip_leading_scaffolding(sanitized)
     sanitized, trailing_removed = _strip_trailing_scaffolding(sanitized)
+    sanitized, stripped_markers = _strip_dangling_markers(sanitized)
     for placeholder, original in placeholders.items():
         sanitized = sanitized.replace(placeholder, original)
     removed = []
     for label in (*leading_removed, *trailing_removed):
         if label not in removed:
             removed.append(label)
+    if stripped_markers and "MARKER_POLLUTION" not in removed:
+        removed.append("MARKER_POLLUTION")
     if not sanitized.strip():
         return "...", removed, True
     return sanitized, removed, False

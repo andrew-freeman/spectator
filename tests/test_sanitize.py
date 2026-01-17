@@ -37,8 +37,18 @@ def test_sanitize_strips_state_only_output() -> None:
     assert sanitize_visible_text(text) == "..."
 
 
+def test_sanitize_strips_history_only_output() -> None:
+    text = "HISTORY:\n{...}"
+    assert sanitize_visible_text(text) == "..."
+
+
 def test_sanitize_strips_trailing_state_block() -> None:
     text = "Hello\n\nSTATE:\n{...}"
+    assert sanitize_visible_text(text) == "Hello"
+
+
+def test_sanitize_strips_trailing_history_block() -> None:
+    text = "Hello\n\nHISTORY:\n{...}"
     assert sanitize_visible_text(text) == "Hello"
 
 
@@ -50,3 +60,13 @@ def test_sanitize_keeps_notes_json_marker() -> None:
 def test_sanitize_keeps_tool_calls_json_marker() -> None:
     text = f"{TOOLS_START}\n[]\n{TOOLS_END}"
     assert sanitize_visible_text(text) == text
+
+
+def test_sanitize_strips_dangling_markers() -> None:
+    text = f"Alpha {TOOLS_START} Beta {NOTES_END} Gamma"
+    assert sanitize_visible_text(text) == "Alpha  Beta  Gamma"
+
+
+def test_sanitize_strips_dangling_markers_only_output() -> None:
+    text = f"{TOOLS_START}\n{NOTES_END}"
+    assert sanitize_visible_text(text) == "..."
