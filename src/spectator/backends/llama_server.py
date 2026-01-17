@@ -8,6 +8,12 @@ from typing import Any, Iterable, Iterator
 
 from spectator.backends.registry import register_backend
 
+SYSTEM_RULES = (
+    "You are Spectator. Do not reveal chain-of-thought. "
+    "Do not output internal scaffolding like STATE/UPSTREAM/USER. "
+    "Output only the final user-facing answer."
+)
+
 
 def _env_float(name: str, default: float) -> float:
     raw = os.getenv(name)
@@ -24,7 +30,7 @@ class LlamaServerBackend:
     base_url: str = os.getenv("LLAMA_SERVER_BASE_URL", "http://127.0.0.1:8080")
     timeout_s: float = _env_float("LLAMA_SERVER_TIMEOUT_S", 60.0)
     api_key: str | None = os.getenv("LLAMA_SERVER_API_KEY")
-    model: str = os.getenv("LLAMA_SERVER_MODEL", "llama")
+    model: str | None = os.getenv("LLAMA_SERVER_MODEL")
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -35,11 +41,16 @@ class LlamaServerBackend:
     def _build_payload(self, prompt: str, params: dict[str, Any]) -> dict[str, Any]:
         options = dict(params)
         options.pop("role", None)
+        messages = options.pop("messages", None)
         model = options.pop("model", self.model)
-        payload = {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-        }
+        if messages is None:
+            messages = [
+                {"role": "system", "content": SYSTEM_RULES},
+                {"role": "user", "content": prompt},
+            ]
+        payload = {"messages": messages}
+        if model:
+            payload["model"] = model
         payload.update(options)
         return payload
 
