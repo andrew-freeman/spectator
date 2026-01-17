@@ -30,3 +30,23 @@ def test_sanitize_keeps_tool_calls_block() -> None:
         "Outro"
     )
     assert sanitize_visible_text(text) == text
+
+
+def test_sanitize_strips_state_only_output() -> None:
+    text = "STATE:\n{...}"
+    assert sanitize_visible_text(text) == "..."
+
+
+def test_sanitize_strips_trailing_state_block() -> None:
+    text = "Hello\n\nSTATE:\n{...}"
+    assert sanitize_visible_text(text) == "Hello"
+
+
+def test_sanitize_keeps_notes_json_marker() -> None:
+    text = f"{NOTES_START}\n{{\"notes\": true}}\n{NOTES_END}"
+    assert sanitize_visible_text(text) == text
+
+
+def test_sanitize_keeps_tool_calls_json_marker() -> None:
+    text = f"{TOOLS_START}\n[]\n{TOOLS_END}"
+    assert sanitize_visible_text(text) == text
