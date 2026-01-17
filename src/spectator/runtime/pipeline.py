@@ -344,16 +344,17 @@ def run_pipeline(
             else:
                 final_response = visible_text
 
-        visible_text, patch = extract_notes(final_response)
-        sanitized_text, removed, sanitized_empty = sanitize_visible_text_with_report(visible_text)
-        if sanitized_text != visible_text and tracer is not None:
+        tool_stripped, _ignored_calls = extract_tool_calls(final_response)
+        notes_stripped, patch = extract_notes(tool_stripped)
+        sanitized_text, removed, sanitized_empty = sanitize_visible_text_with_report(notes_stripped)
+        if sanitized_text != notes_stripped and tracer is not None:
             tracer.write(
                 TraceEvent(
                     ts=time.time(),
                     kind="sanitize",
                     data={
                         "role": role.name,
-                        "before_chars": len(visible_text),
+                        "before_chars": len(notes_stripped),
                         "after_chars": len(sanitized_text),
                         "removed": removed,
                     },

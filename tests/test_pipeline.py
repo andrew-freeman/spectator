@@ -202,6 +202,47 @@ def test_pipeline_traces_visible_response(tmp_path) -> None:
     assert final_text == "Visible"
 
 
+def test_pipeline_strips_tool_and_notes_blocks_before_tracing(tmp_path) -> None:
+    checkpoint = Checkpoint(session_id="s-12", revision=0, updated_ts=0.0, state=State())
+    backend = FakeBackend()
+    backend.extend_role_responses(
+        "governor",
+        [
+            "HISTORY:\nuser: hi\n\nVisible answer.\n"
+            "<<<TOOL_CALLS_JSON>>>\n"
+            "[{\"id\":\"call-1\",\"tool\":\"search\",\"args\":{\"q\":\"hello\"}}]\n"
+            "<<<END_TOOL_CALLS_JSON>>>\n"
+            "<<<NOTES_JSON>>>\n"
+            "{\"set_goals\":[\"ship\"]}\n"
+            "<<<END_NOTES_JSON>>>\n",
+        ],
+    )
+    roles = [RoleSpec(name="governor", system_prompt="Decide.")]
+    tracer = TraceWriter("session-12", base_dir=tmp_path / "traces")
+
+    final_text, results, updated = run_pipeline(
+        checkpoint, "hello", roles, backend, tracer=tracer, max_tool_rounds=1
+    )
+
+    assert "TOOL_CALLS_JSON" not in final_text
+    assert "NOTES_JSON" not in final_text
+    assert "HISTORY:" not in final_text
+    assert final_text.strip() == "Visible answer."
+    assert results[0].text.strip() == "Visible answer."
+    assert updated.state.goals == ["ship"]
+
+    events = [
+        json.loads(line)
+        for line in tracer.path.read_text(encoding="utf-8").strip().splitlines()
+    ]
+    visible_events = [event for event in events if event["kind"] == "visible_response"]
+    assert len(visible_events) == 1
+    visible_output = visible_events[0]["data"]["visible_response"]
+    assert "TOOL_CALLS_JSON" not in visible_output
+    assert "NOTES_JSON" not in visible_output
+    assert "HISTORY:" not in visible_output
+
+
 def test_pipeline_traces_streaming_deltas(tmp_path) -> None:
     class StreamingBackend:
         def __init__(self) -> None:
