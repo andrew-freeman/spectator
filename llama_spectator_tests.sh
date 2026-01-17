@@ -86,14 +86,15 @@ run_case() {
   {
     echo "=== CMD ==="
     #echo "$SPECTATOR_CMD run --backend $BACKEND --session $SESSION_ID --text <prompt>"
-    echo "$SPECTATOR_PY -m $SPECTATOR_MOD run --backend $BACKEND --session $SESSION_ID --text <prompt>"
+    echo "SPECTATOR_TEST_OUTDIR=$OUTDIR SPECTATOR_TEST_CASE_ID=$case_id $SPECTATOR_PY -m $SPECTATOR_MOD run --backend $BACKEND --session $SESSION_ID --text <prompt>"
     echo
     echo "=== PROMPT ==="
     cat "$case_dir/prompt.txt"
     echo
     echo "=== OUTPUT ==="
     #"$SPECTATOR_CMD" run --backend "$BACKEND" --session "$SESSION_ID" --text "$prompt"
-    "$SPECTATOR_PY" -m "$SPECTATOR_MOD" run --backend "$BACKEND" --session "$SESSION_ID" --text "$prompt"
+    SPECTATOR_TEST_OUTDIR="$OUTDIR" SPECTATOR_TEST_CASE_ID="$case_id" \
+      "$SPECTATOR_PY" -m "$SPECTATOR_MOD" run --backend "$BACKEND" --session "$SESSION_ID" --text "$prompt"
     echo
   } > "$case_dir/stdout.txt" 2>&1 || true
 
@@ -141,11 +142,20 @@ run_case() {
   local is_empty=0
   if [[ -z "$trimmed" ]]; then is_empty=1; fi
 
+  # Request artifact detection
+  local request_missing=0
+  if [[ ! -d "$case_dir/requests" ]]; then
+    request_missing=1
+  elif ! ls "$case_dir/requests"/*.json >/dev/null 2>&1; then
+    request_missing=1
+  fi
+
   # Summarize outcome
   {
     echo "case_id=$case_id"
     echo "empty_output=$is_empty"
     echo "leak_found=$leak_found"
+    echo "request_artifacts_missing=$request_missing"
     echo "output_preview=$(printf '%s' "$out_text" | head -c 200 | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g')"
   } > "$case_dir/meta.txt"
 
@@ -324,4 +334,3 @@ log "Summary: $SUMMARY"
 log "Artifacts: $OUTDIR"
 echo
 cat "$SUMMARY"
-
