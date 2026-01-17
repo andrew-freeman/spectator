@@ -5,11 +5,12 @@ import os
 import time
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterable
 
 from spectator.backends.registry import register_backend
 from spectator.core.tracing import TraceEvent
 from spectator.prompts import load_prompt
+from spectator.utils import test_artifacts
 
 _DEFAULT_LLAMA_RULES_PROMPT = "system/llama_rules.txt"
 _ENV_LLAMA_RULES_PROMPT = "SPECTATOR_LLAMA_RULES_PROMPT"
@@ -126,16 +127,6 @@ class LlamaServerBackend:
             if stripped.startswith("data:"):
                 yield stripped[len("data:") :].strip()
 
-    def _open_stream(self, url: str, payload: dict[str, Any]) -> Iterator[str]:
-        data = json.dumps(payload).encode("utf-8")
-        request = urllib.request.Request(url, data=data, headers=self._headers(), method="POST")
-        response = urllib.request.urlopen(request, timeout=self.timeout_s)
-        try:
-            for raw_line in response:
-                yield raw_line.decode("utf-8")
-        finally:
-            response.close()
-
     def reset_slot_cache(self, run_id: str | None = None, tracer=None) -> None:
         if not self.reset_slot:
             return
@@ -168,38 +159,133 @@ class LlamaServerBackend:
         stream = bool(payload.get("stream"))
         stream_callback = params.get("stream_callback")
         url = f"{self.base_url.rstrip('/')}/v1/chat/completions"
+        headers = self._headers()
+        context = test_artifacts.get_test_context()
+        pid = os.getpid()
+        seq = test_artifacts.next_sequence() if context.enabled else None
+        request_info = {
+            "url": url,
+            "method": "POST",
+            "headers": headers,
+            "payload": payload,
+        }
+        if context.enabled and seq is not None and context.outdir and context.case_id:
+            requests_dir, responses_dir, meta_dir = test_artifacts.artifact_paths(
+                context.outdir, context.case_id
+            )
+            test_artifacts.ensure_dirs(requests_dir, responses_dir, meta_dir)
+            redacted_request = test_artifacts.maybe_redact(request_info, context.redact)
+            request_bytes = test_artifacts.json_bytes(redacted_request)
+            request_path = requests_dir / f"{seq:04d}__pid{pid}.json"
+            test_artifacts.write_bytes(request_path, request_bytes)
+            request_hash = test_artifacts.sha256_bytes(request_bytes)
+        else:
+            requests_dir = responses_dir = meta_dir = None
+            request_hash = None
 
         if not stream:
             data = json.dumps(payload).encode("utf-8")
-            request = urllib.request.Request(url, data=data, headers=self._headers(), method="POST")
+            request = urllib.request.Request(url, data=data, headers=headers, method="POST")
+            start = time.monotonic()
             with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
                 body = response.read().decode("utf-8")
+                status_code = response.status
+            latency_ms = int((time.monotonic() - start) * 1000)
+            if (
+                context.enabled
+                and seq is not None
+                and responses_dir is not None
+                and meta_dir is not None
+                and context.outdir
+                and context.case_id
+            ):
+                response_bytes = body.encode("utf-8")
+                response_path = responses_dir / f"{seq:04d}__pid{pid}.json"
+                test_artifacts.write_bytes(response_path, response_bytes)
+                response_hash = test_artifacts.sha256_bytes(response_bytes)
+                meta = {
+                    "timestamp": time.time(),
+                    "url": url,
+                    "method": "POST",
+                    "status_code": status_code,
+                    "latency_ms": latency_ms,
+                    "backend": "llama",
+                    "model": payload.get("model"),
+                    "session_id": context.session_id,
+                    "case_id": context.case_id,
+                    "request_sha256": request_hash,
+                    "response_sha256": response_hash,
+                }
+                meta_path = meta_dir / f"{seq:04d}__pid{pid}.meta.json"
+                test_artifacts.write_json(meta_path, meta)
             return self._extract_content(json.loads(body))
 
         raw_parts: list[str] = []
-        for data in self._iter_sse_lines(self._open_stream(url, payload)):
-            if data == "[DONE]":
-                break
-            try:
-                payload = json.loads(data)
-            except json.JSONDecodeError:
-                continue
-            delta = ""
-            choices = payload.get("choices")
-            if isinstance(choices, list) and choices:
-                first = choices[0]
-                if isinstance(first, dict):
-                    message = first.get("delta")
-                    if isinstance(message, dict):
-                        content = message.get("content")
-                        if isinstance(content, str):
-                            delta = content
-                    elif isinstance(first.get("text"), str):
-                        delta = first["text"]
-            if delta:
-                raw_parts.append(delta)
-                if callable(stream_callback):
-                    stream_callback(delta)
+        response_lines: list[str] = []
+        data = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(url, data=data, headers=headers, method="POST")
+        start = time.monotonic()
+        with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
+            status_code = response.status
+            done = False
+            for raw_line in response:
+                decoded_line = raw_line.decode("utf-8")
+                response_lines.append(decoded_line)
+                for sse_payload in self._iter_sse_lines([decoded_line]):
+                    if sse_payload == "[DONE]":
+                        done = True
+                        break
+                    try:
+                        sse_data = json.loads(sse_payload)
+                    except json.JSONDecodeError:
+                        continue
+                    delta = ""
+                    choices = sse_data.get("choices")
+                    if isinstance(choices, list) and choices:
+                        first = choices[0]
+                        if isinstance(first, dict):
+                            message = first.get("delta")
+                            if isinstance(message, dict):
+                                content = message.get("content")
+                                if isinstance(content, str):
+                                    delta = content
+                            elif isinstance(first.get("text"), str):
+                                delta = first["text"]
+                    if delta:
+                        raw_parts.append(delta)
+                        if callable(stream_callback):
+                            stream_callback(delta)
+                if done:
+                    break
+        latency_ms = int((time.monotonic() - start) * 1000)
+        if (
+            context.enabled
+            and seq is not None
+            and responses_dir is not None
+            and meta_dir is not None
+            and context.outdir
+            and context.case_id
+        ):
+            response_text = "".join(response_lines)
+            response_bytes = response_text.encode("utf-8")
+            response_path = responses_dir / f"{seq:04d}__pid{pid}.json"
+            test_artifacts.write_bytes(response_path, response_bytes)
+            response_hash = test_artifacts.sha256_bytes(response_bytes)
+            meta = {
+                "timestamp": time.time(),
+                "url": url,
+                "method": "POST",
+                "status_code": status_code,
+                "latency_ms": latency_ms,
+                "backend": "llama",
+                "model": payload.get("model"),
+                "session_id": context.session_id,
+                "case_id": context.case_id,
+                "request_sha256": request_hash,
+                "response_sha256": response_hash,
+            }
+            meta_path = meta_dir / f"{seq:04d}__pid{pid}.meta.json"
+            test_artifacts.write_json(meta_path, meta)
         return "".join(raw_parts)
 
 
