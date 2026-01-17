@@ -353,10 +353,17 @@ def run_pipeline(
                             TraceEvent(
                                 ts=time.time(),
                                 kind="tool_start",
-                                data={"role": role.name, "id": call.id, "tool": call.tool},
+                                data={
+                                    "role": role.name,
+                                    "id": call.id,
+                                    "tool": call.tool,
+                                    "args": call.args,
+                                },
                             )
                         )
+                    tool_started = time.monotonic()
                     result = tool_executor.execute_calls([call], checkpoint.state)[0]
+                    duration_ms = (time.monotonic() - tool_started) * 1000.0
                     tool_results.append(result)
                     if tracer is not None:
                         data = {
@@ -365,6 +372,8 @@ def run_pipeline(
                             "tool": result.tool,
                             "ok": result.ok,
                             "error": result.error,
+                            "duration_ms": duration_ms,
+                            "args": call.args,
                         }
                         if result.metadata:
                             data.update(result.metadata)

@@ -187,3 +187,15 @@ def test_http_get_strips_html(tmp_path, monkeypatch) -> None:
 
     assert result.ok is True
     assert result.output["text"] == "Hello world"
+
+
+def test_http_get_rejects_non_http_scheme(tmp_path) -> None:
+    settings = ToolSettings(http_cache_path=tmp_path / "cache.sqlite")
+    _registry, executor = build_default_registry(tmp_path, settings=settings)
+    state = State(capabilities_granted=["net"])
+    call = ToolCall(id="t1", tool="http.get", args={"url": "file:///etc/passwd"})
+
+    result = executor.execute_calls([call], state)[0]
+
+    assert result.ok is False
+    assert "http or https" in (result.error or "")
