@@ -11,6 +11,7 @@ class FakeBackend:
     responses: List[str] = field(default_factory=list)
     role_responses: dict[str, List[str]] = field(default_factory=dict)
     calls: List[dict[str, Any]] = field(default_factory=list)
+    supports_messages: bool = False
 
     def complete(self, prompt: str, params: dict[str, Any] | None = None) -> str:
         payload = {"prompt": prompt, "params": params or {}}

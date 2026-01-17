@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable, Iterator
 
 from spectator.backends.registry import register_backend
+from spectator.core.tracing import TraceEvent
 from spectator.prompts import load_prompt
 
 _DEFAULT_LLAMA_RULES_PROMPT = "system/llama_rules.txt"
@@ -41,6 +43,23 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 @dataclass(slots=True)
 class LlamaServerBackend:
     base_url: str = os.getenv("LLAMA_SERVER_BASE_URL", "http://127.0.0.1:8080")
@@ -48,6 +67,9 @@ class LlamaServerBackend:
     api_key: str | None = os.getenv("LLAMA_SERVER_API_KEY")
     model: str | None = os.getenv("LLAMA_SERVER_MODEL")
     supports_messages: bool = True
+    reset_slot: bool = _env_bool("LLAMA_SERVER_RESET_SLOT", False)
+    slot_id: int = _env_int("LLAMA_SERVER_SLOT_ID", 0)
+    _reset_run_ids: set[str] = field(default_factory=set, init=False, repr=False)
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -113,6 +135,32 @@ class LlamaServerBackend:
                 yield raw_line.decode("utf-8")
         finally:
             response.close()
+
+    def reset_slot_cache(self, run_id: str | None = None, tracer=None) -> None:
+        if not self.reset_slot:
+            return
+        token = run_id or "default"
+        if token in self._reset_run_ids:
+            return
+        self._reset_run_ids.add(token)
+        url = f"{self.base_url.rstrip('/')}/slots/{self.slot_id}?action=erase"
+        try:
+            request = urllib.request.Request(url, data=b"", headers=self._headers(), method="POST")
+            with urllib.request.urlopen(request, timeout=self.timeout_s):
+                return
+        except Exception as exc:  # noqa: BLE001
+            if tracer is not None:
+                tracer.write(
+                    TraceEvent(
+                        ts=time.time(),
+                        kind="warning",
+                        data={
+                            "backend": "llama",
+                            "message": "Failed to reset llama slot cache.",
+                            "error": str(exc),
+                        },
+                    )
+                )
 
     def complete(self, prompt: str, params: dict[str, Any] | None = None) -> str:
         params = params or {}

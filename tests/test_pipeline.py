@@ -323,6 +323,25 @@ def test_pipeline_includes_empty_history_instruction_when_absent() -> None:
     assert prompt.count("HISTORY_JSON:") == 1
 
 
+def test_pipeline_sends_system_and_user_messages_separately() -> None:
+    checkpoint = Checkpoint(session_id="s-15", revision=0, updated_ts=0.0, state=State())
+    backend = FakeBackend()
+    backend.supports_messages = True
+    backend.extend_role_responses("reflection", ["reflection output"])
+
+    roles = [RoleSpec(name="reflection", system_prompt="System rules.")]
+
+    run_pipeline(checkpoint, "hello", roles, backend)
+
+    call = backend.calls[0]
+    messages = call["params"]["messages"]
+    assert messages[0] == {"role": "system", "content": "System rules."}
+    assert "STATE:\n" in messages[1]["content"]
+    assert "USER:\nhello" in messages[1]["content"]
+    assert "System rules." not in messages[1]["content"]
+    assert "STATE:\n" in call["prompt"]
+
+
 def test_pipeline_llama_history_instructions_stay_in_system_message() -> None:
     class DummyLlamaBackend(LlamaServerBackend):
         def __init__(self) -> None:
