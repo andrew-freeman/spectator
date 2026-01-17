@@ -30,10 +30,15 @@ _REASONING_PATTERNS = [
 
 _SCAFFOLD_HEADERS = {
     "HISTORY:": "HISTORY",
+    "HISTORY_JSON:": "HISTORY",
     "STATE:": "STATE",
     "UPSTREAM:": "UPSTREAM",
     "USER:": "USER",
     "TOOL_RESULTS:": "TOOL_RESULTS",
+    "reflection:": "ROLE_TRANSCRIPT",
+    "planner:": "ROLE_TRANSCRIPT",
+    "critic:": "ROLE_TRANSCRIPT",
+    "assistant:": "ROLE_TRANSCRIPT",
 }
 _RETRIEVED_START = "=== RETRIEVED_MEMORY ==="
 _RETRIEVED_END = "=== END_RETRIEVED_MEMORY ==="

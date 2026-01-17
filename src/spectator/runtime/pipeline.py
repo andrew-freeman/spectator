@@ -77,10 +77,28 @@ def _format_history(
     filtered = [message for message in messages if message.role in {"user", "assistant"}]
     if max_messages > 0:
         filtered = filtered[-max_messages:]
-    text = "\n".join(f"{message.role}: {message.content}" for message in filtered)
-    if max_chars > 0 and len(text) > max_chars:
-        text = text[-max_chars:]
-    return text
+    history = [{"role": message.role, "content": message.content} for message in filtered]
+    if max_chars > 0:
+        while history:
+            serialized = json.dumps(history, ensure_ascii=False)
+            if len(serialized) <= max_chars:
+                return serialized
+            if len(history) > 1:
+                history = history[1:]
+                continue
+            base_len = len(
+                json.dumps(
+                    [{"role": history[0]["role"], "content": ""}],
+                    ensure_ascii=False,
+                )
+            )
+            allowed = max_chars - base_len
+            if allowed <= 0:
+                history = []
+                break
+            history[0]["content"] = history[0]["content"][-allowed:]
+            break
+    return json.dumps(history, ensure_ascii=False)
 
 
 def _compose_prompt(
@@ -112,8 +130,8 @@ def _compose_prompt(
         parts.append(memory_feedback)
     if retrieval_block and role.wants_retrieval:
         parts.append(retrieval_block)
-    history_text = history or "(empty)"
-    parts.append(f"HISTORY:\n{history_text}")
+    history_text = history or "[]"
+    parts.append(f"HISTORY_JSON:\n{history_text}")
     if upstream:
         upstream_text = "\n".join(f"{result.role}: {result.text}" for result in upstream)
         parts.append(f"UPSTREAM:\n{upstream_text}")

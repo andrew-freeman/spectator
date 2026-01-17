@@ -1,3 +1,5 @@
+import json
+
 from spectator.backends.fake import FakeBackend
 from spectator.core.types import ChatMessage, Checkpoint, State
 from spectator.runtime.controller import run_turn
@@ -14,11 +16,14 @@ def test_format_history_bounds_messages_and_chars() -> None:
     ]
 
     formatted = _format_history(messages, max_messages=2, max_chars=2000)
-    assert formatted == "user: third\nassistant: fourth"
+    assert json.loads(formatted) == [
+        {"role": "user", "content": "third"},
+        {"role": "assistant", "content": "fourth"},
+    ]
 
     truncated = _format_history(messages, max_messages=8, max_chars=10)
     assert len(truncated) <= 10
-    assert truncated.endswith("fourth"[-min(10, len("fourth")) :])
+    json.loads(truncated)
 
 
 def test_prompt_includes_history_for_previous_turn(tmp_path) -> None:
@@ -39,8 +44,10 @@ def test_prompt_includes_history_for_previous_turn(tmp_path) -> None:
     governor_prompts = [
         call["prompt"] for call in backend.calls if call["params"].get("role") == "governor"
     ]
-    assert "HISTORY:" in governor_prompts[-1]
-    assert "user: Hello" in governor_prompts[-1]
+    assert "HISTORY_JSON:" in governor_prompts[-1]
+    history_block = governor_prompts[-1].split("HISTORY_JSON:\n", 1)[1].split("\n\n", 1)[0]
+    history_payload = json.loads(history_block)
+    assert {"role": "user", "content": "Hello"} in history_payload
 
 
 def test_identity_response_avoids_vendor_names() -> None:

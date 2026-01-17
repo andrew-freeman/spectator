@@ -64,6 +64,8 @@ class LlamaServerBackend:
         payload = {"messages": messages}
         if model:
             payload["model"] = model
+        if "cache_prompt" not in options:
+            payload["cache_prompt"] = False
         payload.update(options)
         return payload
 
