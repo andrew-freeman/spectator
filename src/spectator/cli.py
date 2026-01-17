@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any
 
+from spectator.backends import get_backend, list_backends
 from spectator.backends.fake import FakeBackend
 from spectator.runtime import controller
 from spectator.runtime.tool_calls import END_MARKER, START_MARKER
@@ -39,15 +41,31 @@ def _build_smoke_backend() -> FakeBackend:
     return backend
 
 
+def _resolve_backend_name(cli_value: str | None) -> str:
+    if cli_value:
+        return cli_value
+    return os.getenv("SPECTATOR_BACKEND", "fake")
+
+
+def _build_backend(args: argparse.Namespace):
+    backend_name = _resolve_backend_name(getattr(args, "backend", None))
+    backend_kwargs: dict[str, Any] = {}
+    if getattr(args, "model", None):
+        backend_kwargs["model"] = args.model
+    if getattr(args, "llama_url", None) and backend_name == "llama":
+        backend_kwargs["base_url"] = args.llama_url
+    return get_backend(backend_name, **backend_kwargs)
+
+
 def _run_command(args: argparse.Namespace) -> int:
-    backend = StdinBackend()
+    backend = _build_backend(args)
     final_text = controller.run_turn(args.session, args.text, backend)
     print(final_text)
     return 0
 
 
 def _repl_command(args: argparse.Namespace) -> int:
-    backend = StdinBackend()
+    backend = _build_backend(args)
     session_id = args.session
     while True:
         try:
@@ -90,10 +108,16 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser("run", help="Run a single turn")
     run_parser.add_argument("--session", default="demo-1")
     run_parser.add_argument("--text", required=True)
+    run_parser.add_argument("--backend", choices=list_backends())
+    run_parser.add_argument("--model")
+    run_parser.add_argument("--llama-url")
     run_parser.set_defaults(func=_run_command)
 
     repl_parser = subparsers.add_parser("repl", help="Run an interactive REPL")
     repl_parser.add_argument("--session", default="demo-1")
+    repl_parser.add_argument("--backend", choices=list_backends())
+    repl_parser.add_argument("--model")
+    repl_parser.add_argument("--llama-url")
     repl_parser.set_defaults(func=_repl_command)
 
     smoke_parser = subparsers.add_parser("smoke", help="Run the smoke demo")

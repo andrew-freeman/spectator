@@ -6,6 +6,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Iterable, Iterator
 
+from spectator.backends.registry import register_backend
+
 
 def _env_float(name: str, default: float) -> float:
     raw = os.getenv(name)
@@ -22,6 +24,7 @@ class LlamaServerBackend:
     base_url: str = os.getenv("LLAMA_SERVER_BASE_URL", "http://127.0.0.1:8080")
     timeout_s: float = _env_float("LLAMA_SERVER_TIMEOUT_S", 60.0)
     api_key: str | None = os.getenv("LLAMA_SERVER_API_KEY")
+    model: str = os.getenv("LLAMA_SERVER_MODEL", "llama")
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -32,7 +35,7 @@ class LlamaServerBackend:
     def _build_payload(self, prompt: str, params: dict[str, Any]) -> dict[str, Any]:
         options = dict(params)
         options.pop("role", None)
-        model = options.pop("model", "llama")
+        model = options.pop("model", self.model)
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
@@ -112,3 +115,6 @@ class LlamaServerBackend:
             if delta:
                 raw_parts.append(delta)
         return "".join(raw_parts)
+
+
+register_backend("llama", LlamaServerBackend)

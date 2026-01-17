@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
+from spectator.backends import get_backend
 from spectator.core.tracing import TraceWriter
 from spectator.core.types import ChatMessage
 from spectator.runtime import checkpoints
@@ -10,8 +12,17 @@ from spectator.tools import build_default_registry
 
 
 def run_turn(
-    session_id: str, user_text: str, backend, base_dir: Path | None = None
+    session_id: str,
+    user_text: str,
+    backend=None,
+    base_dir: Path | None = None,
+    *,
+    backend_name: str | None = None,
+    backend_params: dict[str, object] | None = None,
 ) -> str:
+    if backend is None:
+        name = backend_name or os.getenv("SPECTATOR_BACKEND", "fake")
+        backend = get_backend(name, **(backend_params or {}))
     data_root = base_dir or checkpoints.DEFAULT_DIR.parent
     checkpoint_dir = data_root / "checkpoints"
     checkpoint = checkpoints.load_or_create(session_id, base_dir=checkpoint_dir)
