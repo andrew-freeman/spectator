@@ -21,11 +21,24 @@ def run_turn(
     sandbox_root.mkdir(parents=True, exist_ok=True)
     _registry, executor = build_default_registry(sandbox_root)
 
+    safety_suffix = "Don't output chain-of-thought; output only final answer."
     roles = [
-        RoleSpec(name="reflection", system_prompt="Reflect on the request."),
-        RoleSpec(name="planner", system_prompt="Plan a response."),
-        RoleSpec(name="critic", system_prompt="Critique the plan."),
-        RoleSpec(name="governor", system_prompt="Decide on the final response."),
+        RoleSpec(
+            name="reflection",
+            system_prompt=f"Reflect on the request. {safety_suffix}",
+        ),
+        RoleSpec(
+            name="planner",
+            system_prompt=f"Plan a response. {safety_suffix}",
+        ),
+        RoleSpec(
+            name="critic",
+            system_prompt=f"Critique the plan. {safety_suffix}",
+        ),
+        RoleSpec(
+            name="governor",
+            system_prompt=f"Decide on the final response. {safety_suffix}",
+        ),
     ]
 
     run_id = f"rev-{checkpoint.revision + 1}"

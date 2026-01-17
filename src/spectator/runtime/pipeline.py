@@ -12,6 +12,7 @@ from spectator.runtime.capabilities import apply_permission_actions
 from spectator.runtime.condense import CondensePolicy, condense_state, condense_upstream
 from spectator.runtime.memory_feedback import compute_memory_pressure, format_memory_feedback
 from spectator.runtime.notes import NotesPatch, extract_notes
+from spectator.runtime.sanitize import sanitize_visible_text
 from spectator.runtime.tool_calls import extract_tool_calls
 from spectator.tools.executor import ToolExecutor
 from spectator.tools.results import ToolResult
@@ -223,7 +224,7 @@ def run_pipeline(
         )
         params = dict(role.params)
         params.setdefault("role", role.name)
-        def _complete(request_prompt: str) -> str:
+        def _complete(request_prompt: str) -> tuple[str, str]:
             if tracer is not None:
                 tracer.write(
                     TraceEvent(
@@ -233,20 +234,25 @@ def run_pipeline(
                     )
                 )
             completion = backend.complete(request_prompt, params=params)
+            visible_response = sanitize_visible_text(completion)
             if tracer is not None:
                 tracer.write(
                     TraceEvent(
                         ts=time.time(),
                         kind="llm_done",
-                        data={"role": role.name, "response": completion},
+                        data={
+                            "role": role.name,
+                            "response": completion,
+                            "visible_response": visible_response,
+                        },
                     )
                 )
-            return completion
+            return completion, visible_response
 
-        response = _complete(prompt)
-        final_response = response
+        response, response_visible = _complete(prompt)
+        final_response = response_visible
         if role.name == "governor" and max_tool_rounds > 1:
-            visible_text, tool_calls = extract_tool_calls(response)
+            visible_text, tool_calls = extract_tool_calls(response_visible)
             if tool_calls and tool_executor is not None:
                 if tracer is not None:
                     tracer.write(
@@ -286,11 +292,11 @@ def run_pipeline(
                                 ts=time.time(),
                                 kind="tool_done",
                                 data=data,
-                            )
                         )
+                    )
                 tool_results_block = _format_tool_results(tool_results)
-                response = _complete(f"{prompt}\n\n{tool_results_block}")
-                final_response, ignored_calls = extract_tool_calls(response)
+                response, response_visible = _complete(f"{prompt}\n\n{tool_results_block}")
+                final_response, ignored_calls = extract_tool_calls(response_visible)
                 if ignored_calls and tracer is not None:
                     tracer.write(
                         TraceEvent(
