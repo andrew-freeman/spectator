@@ -19,7 +19,10 @@ def test_llama_backend_build_payload_injects_system_rules() -> None:
 
 def test_llama_backend_build_payload_respects_messages_override() -> None:
     backend = LlamaServerBackend()
-    custom_messages = [{"role": "system", "content": "custom"}]
+    custom_messages = [
+        {"role": "system", "content": "custom system"},
+        {"role": "user", "content": "custom user"},
+    ]
     payload = backend._build_payload("hello", {"messages": custom_messages})
 
     assert payload["messages"] == custom_messages

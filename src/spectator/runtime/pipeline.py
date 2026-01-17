@@ -102,7 +102,7 @@ def _format_history(
     return json.dumps(history, ensure_ascii=False)
 
 
-def _compose_prompt(
+def _compose_user_content(
     role: RoleSpec,
     state: State,
     upstream: list[RoleResult],
@@ -111,11 +111,8 @@ def _compose_prompt(
     telemetry: TelemetrySnapshot | None,
     memory_feedback: str | None,
     retrieval_block: str | None,
-    include_system_prompt: bool = True,
 ) -> str:
     parts: list[str] = []
-    if include_system_prompt and role.system_prompt:
-        parts.append(role.system_prompt)
     parts.append(f"STATE:\n{_compact_state(state)}")
     if telemetry is not None and role.telemetry == "basic":
         telemetry_text = "\n".join(
@@ -271,7 +268,7 @@ def run_pipeline(
         params = dict(role.params)
         params.setdefault("role", role.name)
         use_messages = bool(getattr(backend, "supports_messages", False))
-        user_prompt = _compose_prompt(
+        user_content = _compose_user_content(
             role,
             checkpoint.state,
             results,
@@ -280,14 +277,11 @@ def run_pipeline(
             telemetry_snapshot,
             memory_feedback_block,
             retrieval_block,
-            include_system_prompt=False,
         )
-        system_prompt = None
-        if use_messages:
-            system_prompt = _build_system_message(role, backend, params)
-        prompt = user_prompt
-        if not use_messages and role.system_prompt:
-            prompt = "\n\n".join([role.system_prompt, user_prompt]) if user_prompt else role.system_prompt
+        system_content = _build_system_message(role, backend, params)
+        prompt = user_content
+        if not use_messages and system_content:
+            prompt = "\n\n".join([system_content, user_content]) if user_content else system_content
 
         def _complete(request_prompt: str, messages: list[dict[str, str]] | None = None) -> str:
             if tracer is not None:
@@ -331,10 +325,10 @@ def run_pipeline(
             return completion
 
         initial_messages = None
-        if use_messages and system_prompt is not None:
+        if use_messages:
             initial_messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": user_content},
             ]
         response = _complete(prompt, messages=initial_messages)
         final_response = response
@@ -384,12 +378,13 @@ def run_pipeline(
                 tool_results_block = _format_tool_results(tool_results)
                 tool_prompt = f"{prompt}\n\n{tool_results_block}"
                 tool_messages = None
-                if use_messages and system_prompt is not None:
+                if use_messages:
+                    tool_user_content = f"{user_content}\n\n{tool_results_block}"
                     tool_messages = [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": f"{user_prompt}\n\n{tool_results_block}"},
+                        {"role": "system", "content": system_content},
+                        {"role": "user", "content": tool_user_content},
                     ]
-                    tool_prompt = tool_messages[1]["content"]
+                    tool_prompt = tool_user_content
                 response = _complete(tool_prompt, messages=tool_messages)
                 final_response, ignored_calls = extract_tool_calls(response)
                 if ignored_calls and tracer is not None:

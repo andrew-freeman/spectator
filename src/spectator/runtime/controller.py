@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 from spectator.backends import get_backend
+from spectator.backends.llama_server import LlamaServerBackend
 from spectator.core.tracing import TraceWriter
 from spectator.core.types import ChatMessage
 from spectator.prompts import get_role_prompt
@@ -54,6 +55,8 @@ def run_turn(
 
     run_id = f"rev-{checkpoint.revision + 1}"
     tracer = TraceWriter(session_id, base_dir=data_root / "traces", run_id=run_id)
+    if isinstance(backend, LlamaServerBackend):
+        backend.reset_slot_cache(run_id, tracer)
     final_text, _results, updated_checkpoint = run_pipeline(
         checkpoint,
         user_text,
