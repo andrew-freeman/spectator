@@ -22,7 +22,7 @@ Keep each step small and merged with tests.
 - Add minimal runtime skeleton:
   - `Checkpoint`, `State`, `ChatMessage`
   - checkpoint store: load/save latest (atomic write)
-  - trace writer: JSONL to `./data/traces/`
+- trace writer: JSONL to `./data/traces/` (per-run filenames allowed)
 
 Definition of done:
 - `pytest -q` passes

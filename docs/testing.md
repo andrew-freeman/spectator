@@ -47,4 +47,5 @@ Start the interactive REPL (type `/exit` or EOF to quit):
 python -m spectator repl --session demo-1
 ```
 
-By default, data is stored under `./data/` (checkpoints, traces, sandbox).
+By default, data is stored under `./data/` (checkpoints, traces, sandbox). Trace
+files may be written as `<session_id>.jsonl` or `<session_id>__rev-N.jsonl`.
