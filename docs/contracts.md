@@ -122,9 +122,18 @@ The runtime must:
 
 * parse and remove tool-call block from user-visible text
 * execute tools in order with permissioning
-* append results as tool-role messages to the next LLM call in the tool loop
+* inject tool results into the second governor pass as a `TOOL_RESULTS` text block
 
-Tool result message (role="tool") content is JSON:
+Tool results are injected as plain text with one JSON object per line:
+
+```
+TOOL_RESULTS:
+{"id":"t1","tool":"fs.list_dir","ok":true,"output":{...},"error":null,"metadata":null}
+{"id":"t2","tool":"shell.exec","ok":false,"output":null,"error":"denied","metadata":{"reason":"capability_missing"}}
+```
+
+Tool result message (role="tool") content is JSON (available via `ToolResult.to_tool_message`,
+but not used in the current tool loop):
 
 ```json
 {
@@ -193,10 +202,9 @@ Traces are written as JSONL (one event per line) with:
 * `kind: str`
 * `data: object`
 
-Required kinds:
+Required kinds (emitted when applicable):
 
 * `llm_req`
-* `llm_stream`
 * `llm_done`
 * `notes_patch`
 * `actions`
@@ -204,6 +212,15 @@ Required kinds:
 * `tool_plan`
 * `tool_start`
 * `tool_done`
+* `condense`
+* `telemetry`
+* `sanitize`
+* `sanitize_warning`
+* `visible_response`
+
+Optional kinds:
+
+* `llm_stream` (not emitted by the current runtime, even when streaming is enabled)
 
 ---
 
@@ -211,9 +228,35 @@ Required kinds:
 
 Backend interface:
 
-* `chat(request) -> response`
-* `stream_chat(request, cancel) -> async iterator of deltas`
+* `complete(prompt: str, params: dict | None) -> str`
+  * `params["stream"]=True` is supported by the llama backend, but the runtime
+    still only traces `llm_req` and `llm_done` today.
 
 The runtime controller is resilient:
 
 * tools and web fetch do not crash main loop; failures become tool results with ok=false
+
+---
+
+## 8) Prompt composition and history
+
+The runtime pipeline is responsible for composing prompts, including the HISTORY
+block. The controller only appends user/assistant messages to the checkpoint;
+history formatting and injection happens inside the pipeline.
+
+Current history formatting:
+
+* Only `user` and `assistant` messages are included.
+* Last 8 messages are retained.
+* The HISTORY string is truncated to the last 2000 characters.
+* HISTORY is always injected into the role prompt as `HISTORY:\n...`.
+
+---
+
+## Implementation notes
+
+Some earlier design notes are still referenced in older docs and tests but have
+been superseded by the current runtime:
+
+* Tool results are injected as a `TOOL_RESULTS` block (not tool-role messages).
+* The runtime consumes backends via `complete(...)` (not `chat/stream_chat`).

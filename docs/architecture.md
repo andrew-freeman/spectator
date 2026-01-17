@@ -14,5 +14,7 @@ Key layers:
 - `backends`: minimal backend interfaces plus a fake backend for tests.
 
 Artifacts:
-- Traces are written as JSONL under `./data/traces/<session_id>.jsonl`.
+- Traces are written as JSONL under `./data/traces/` using filenames like
+  `<session_id>.jsonl` or `<session_id>__rev-N.jsonl` for per-turn runs.
+- `trace_tail` in checkpoints stores recent trace filenames for a session.
 - Tests live under `tests/` and validate parsing and tracing behavior.
