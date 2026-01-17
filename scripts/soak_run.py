@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from spectator.analysis import analyze_soak, render_summary
 from spectator.backends.fake import FakeBackend
 from spectator.core.tracing import TraceWriter
 from spectator.runtime.checkpoints import load_or_create, save_checkpoint
@@ -136,6 +137,12 @@ def main() -> None:
     parser.add_argument(
         "--session-id", type=str, default="soak-1", help="Session identifier for tracing."
     )
+    parser.add_argument(
+        "--analyze",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Run automated analysis after the soak run.",
+    )
     args = parser.parse_args()
 
     rng = random.Random(args.seed)
@@ -218,6 +225,22 @@ def main() -> None:
     print(f"Tool invocations: {metrics.tool_invocations}")
     print(f"Condense events: {metrics.condense_events}")
     print(f"Elapsed seconds: {duration:.2f}")
+
+    if args.analyze:
+        analysis_dir = base_dir / "analysis"
+        analysis_path = analysis_dir / f"{args.session_id}__{args.seed}.json"
+        summary = analyze_soak(
+            trace_path=tracer.path,
+            checkpoint_path=checkpoint_path,
+            turns=metrics.turns,
+        )
+        analysis_dir.mkdir(parents=True, exist_ok=True)
+        analysis_path.write_text(json.dumps(summary.to_json(), indent=2), encoding="utf-8")
+        print(render_summary(summary))
+        status = "PASS" if not summary.failures else "FAIL"
+        print(f"Analysis {status}: {analysis_path}")
+        if summary.failures:
+            raise SystemExit(2)
 
 
 if __name__ == "__main__":
