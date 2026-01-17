@@ -13,6 +13,14 @@ _PROTECTED_PATTERN = re.compile(
     f"|{re.escape(TOOLS_START)}.*?{re.escape(TOOLS_END)}",
     re.DOTALL,
 )
+_TOOLS_BLOCK_PATTERN = re.compile(
+    f"{re.escape(TOOLS_START)}.*?{re.escape(TOOLS_END)}",
+    re.DOTALL,
+)
+_NOTES_BLOCK_PATTERN = re.compile(
+    f"{re.escape(NOTES_START)}.*?{re.escape(NOTES_END)}",
+    re.DOTALL,
+)
 
 _REASONING_PATTERNS = [
     re.compile(r"<think>.*?</think>", re.DOTALL),
@@ -110,6 +118,21 @@ def _strip_dangling_markers(text: str) -> tuple[str, bool]:
     return sanitized, removed
 
 
+def _strip_tool_notes_blocks(text: str) -> tuple[str, list[str]]:
+    sanitized = text
+    removed: list[str] = []
+    if _TOOLS_BLOCK_PATTERN.search(sanitized):
+        sanitized = _TOOLS_BLOCK_PATTERN.sub("", sanitized)
+        removed.append("TOOL_BLOCK_STRIPPED")
+    if _NOTES_BLOCK_PATTERN.search(sanitized):
+        sanitized = _NOTES_BLOCK_PATTERN.sub("", sanitized)
+        removed.append("NOTES_BLOCK_STRIPPED")
+    sanitized, stripped_markers = _strip_dangling_markers(sanitized)
+    if stripped_markers:
+        removed.append("MARKER_POLLUTION")
+    return sanitized, removed
+
+
 def sanitize_visible_text_with_report(text: str) -> tuple[str, list[str], bool]:
     if not text:
         return text, [], False
@@ -132,12 +155,16 @@ def sanitize_visible_text_with_report(text: str) -> tuple[str, list[str], bool]:
     sanitized, stripped_markers = _strip_dangling_markers(sanitized)
     for placeholder, original in placeholders.items():
         sanitized = sanitized.replace(placeholder, original)
+    sanitized, block_removed = _strip_tool_notes_blocks(sanitized)
     removed = []
     for label in (*leading_removed, *trailing_removed):
         if label not in removed:
             removed.append(label)
     if stripped_markers and "MARKER_POLLUTION" not in removed:
         removed.append("MARKER_POLLUTION")
+    for label in block_removed:
+        if label not in removed:
+            removed.append(label)
     if not sanitized.strip():
         return "...", removed, True
     return sanitized, removed, False
@@ -146,7 +173,7 @@ def sanitize_visible_text_with_report(text: str) -> tuple[str, list[str], bool]:
 def sanitize_visible_text(text: str) -> str:
     """
     Remove prompt scaffolding and other internal-only sections from user-visible output.
-    Must NOT remove NOTES_JSON or TOOL_CALLS_JSON blocks (those are parsed elsewhere).
+    NOTE: tool/notes markers are removed from the final visible output.
     """
     sanitized, _removed, _empty = sanitize_visible_text_with_report(text)
     return sanitized

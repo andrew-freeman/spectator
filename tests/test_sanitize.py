@@ -10,7 +10,7 @@ def test_sanitize_strips_think_blocks() -> None:
     assert sanitize_visible_text(text) == "Hello  world"
 
 
-def test_sanitize_keeps_notes_block() -> None:
+def test_sanitize_strips_notes_block() -> None:
     text = (
         "Intro\n"
         f"{NOTES_START}\n"
@@ -18,10 +18,10 @@ def test_sanitize_keeps_notes_block() -> None:
         f"{NOTES_END}\n"
         "Outro"
     )
-    assert sanitize_visible_text(text) == text
+    assert sanitize_visible_text(text) == "Intro\n\nOutro"
 
 
-def test_sanitize_keeps_tool_calls_block() -> None:
+def test_sanitize_strips_tool_calls_block() -> None:
     text = (
         "Intro\n"
         f"{TOOLS_START}\n"
@@ -29,7 +29,7 @@ def test_sanitize_keeps_tool_calls_block() -> None:
         f"{TOOLS_END}\n"
         "Outro"
     )
-    assert sanitize_visible_text(text) == text
+    assert sanitize_visible_text(text) == "Intro\n\nOutro"
 
 
 def test_sanitize_strips_state_only_output() -> None:
@@ -54,12 +54,12 @@ def test_sanitize_strips_trailing_history_block() -> None:
 
 def test_sanitize_keeps_notes_json_marker() -> None:
     text = f"{NOTES_START}\n{{\"notes\": true}}\n{NOTES_END}"
-    assert sanitize_visible_text(text) == text
+    assert sanitize_visible_text(text) == "..."
 
 
 def test_sanitize_keeps_tool_calls_json_marker() -> None:
     text = f"{TOOLS_START}\n[]\n{TOOLS_END}"
-    assert sanitize_visible_text(text) == text
+    assert sanitize_visible_text(text) == "..."
 
 
 def test_sanitize_strips_dangling_markers() -> None:
