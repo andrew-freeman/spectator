@@ -252,7 +252,20 @@ def run_pipeline(
                         data={"role": role.name, "prompt": request_prompt},
                     )
                 )
-            completion = backend.complete(request_prompt, params=params)
+            payload = dict(params)
+            if payload.get("stream"):
+                def _on_stream(delta: str) -> None:
+                    if tracer is not None:
+                        tracer.write(
+                            TraceEvent(
+                                ts=time.time(),
+                                kind="llm_stream",
+                                data={"role": role.name, "delta": delta},
+                            )
+                        )
+
+                payload["stream_callback"] = _on_stream
+            completion = backend.complete(request_prompt, params=payload)
             if tracer is not None:
                 tracer.write(
                     TraceEvent(
