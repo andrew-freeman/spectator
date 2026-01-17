@@ -6,6 +6,7 @@ from pathlib import Path
 from spectator.backends import get_backend
 from spectator.core.tracing import TraceWriter
 from spectator.core.types import ChatMessage
+from spectator.prompts import get_role_prompt
 from spectator.runtime import checkpoints
 from spectator.runtime.pipeline import RoleSpec, run_pipeline
 from spectator.tools import build_default_registry
@@ -32,27 +33,22 @@ def run_turn(
     sandbox_root.mkdir(parents=True, exist_ok=True)
     _registry, executor = build_default_registry(sandbox_root)
 
-    history_suffix = (
-        "Use HISTORY when answering questions about prior turns. "
-        "If HISTORY is empty, say so and ask for context."
-    )
-    safety_suffix = "Don't output chain-of-thought; output only final answer."
     roles = [
         RoleSpec(
             name="reflection",
-            system_prompt=f"Reflect on the request. {history_suffix} {safety_suffix}",
+            system_prompt=get_role_prompt("reflection"),
         ),
         RoleSpec(
             name="planner",
-            system_prompt=f"Plan a response. {history_suffix} {safety_suffix}",
+            system_prompt=get_role_prompt("planner"),
         ),
         RoleSpec(
             name="critic",
-            system_prompt=f"Critique the plan. {history_suffix} {safety_suffix}",
+            system_prompt=get_role_prompt("critic"),
         ),
         RoleSpec(
             name="governor",
-            system_prompt=f"Decide on the final response. {history_suffix} {safety_suffix}",
+            system_prompt=get_role_prompt("governor"),
         ),
     ]
 

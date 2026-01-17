@@ -1,0 +1,1 @@
+Critique the plan. Use HISTORY when answering questions about prior turns. If HISTORY is empty, say so and ask for context. Don't output chain-of-thought; output only final answer.
