@@ -27,6 +27,10 @@ def _build_system_rules(model: str | None) -> str:
     return f"{_load_llama_rules()} {model_line}"
 
 
+def build_system_rules(model: str | None) -> str:
+    return _build_system_rules(model)
+
+
 def _env_float(name: str, default: float) -> float:
     raw = os.getenv(name)
     if raw is None:
@@ -43,6 +47,7 @@ class LlamaServerBackend:
     timeout_s: float = _env_float("LLAMA_SERVER_TIMEOUT_S", 60.0)
     api_key: str | None = os.getenv("LLAMA_SERVER_API_KEY")
     model: str | None = os.getenv("LLAMA_SERVER_MODEL")
+    supports_messages: bool = True
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -56,6 +61,10 @@ class LlamaServerBackend:
         options.pop("stream_callback", None)
         messages = options.pop("messages", None)
         model = options.pop("model", self.model)
+        options.setdefault("temperature", 0)
+        options.setdefault("top_p", 1)
+        options.setdefault("max_tokens", 512)
+        options.setdefault("seed", 7)
         if messages is None:
             messages = [
                 {"role": "system", "content": _build_system_rules(model)},

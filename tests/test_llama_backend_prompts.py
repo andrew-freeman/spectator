@@ -11,6 +11,10 @@ def test_llama_backend_build_payload_injects_system_rules() -> None:
     assert payload["messages"][0]["role"] == "system"
     assert load_prompt("system/llama_rules.txt") in payload["messages"][0]["content"]
     assert payload["messages"][1] == {"role": "user", "content": "hello"}
+    assert payload["temperature"] == 0
+    assert payload["top_p"] == 1
+    assert payload["max_tokens"] == 512
+    assert payload["seed"] == 7
 
 
 def test_llama_backend_build_payload_respects_messages_override() -> None:
