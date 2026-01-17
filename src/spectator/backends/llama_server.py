@@ -81,6 +81,7 @@ class LlamaServerBackend:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
+    '''
     def _build_payload(self, prompt: str, params: dict[str, Any]) -> dict[str, Any]:
         options = dict(params)
         options.pop("role", None)
@@ -103,6 +104,110 @@ class LlamaServerBackend:
             payload["cache_prompt"] = False
         payload.update(options)
         return payload
+    '''
+
+    def _ensure_system_rules(
+        self,
+        messages: list[dict[str, Any]],
+        system_text: str,
+    ) -> list[dict[str, Any]]:
+        for i, msg in enumerate(messages):
+            if isinstance(msg, dict) and msg.get("role") == "system":
+                content = msg.get("content")
+                if isinstance(content, str) and content.strip():
+                    messages[i] = {"role": "system", "content": f"{system_text}\n\n{content}"}
+                else:
+                    messages[i] = {"role": "system", "content": system_text}
+                return messages
+        return [{"role": "system", "content": system_text}, *messages]
+
+    def _ensure_system_rules(
+        self,
+        messages: list[dict[str, Any]],
+        system_text: str,
+    ) -> list[dict[str, Any]]:
+        for i, msg in enumerate(messages):
+            if isinstance(msg, dict) and msg.get("role") == "system":
+                content = msg.get("content")
+                if isinstance(content, str) and content.strip():
+                    messages[i] = {"role": "system", "content": f"{system_text}\n\n{content}"}
+                else:
+                    messages[i] = {"role": "system", "content": system_text}
+                return messages
+        return [{"role": "system", "content": system_text}, *messages]
+
+
+    def _build_payload(self, prompt: str, params: dict[str, Any]) -> dict[str, Any]:
+        options = dict(params)
+        options.pop("role", None)
+        options.pop("stream_callback", None)
+
+        # NEW: accept upstream system_prompt
+        upstream_system = options.pop("system_prompt", None)
+        if upstream_system is not None and not isinstance(upstream_system, str):
+            upstream_system = str(upstream_system)
+
+        messages = options.pop("messages", None)
+        model = options.pop("model", self.model)
+
+        options.setdefault("temperature", 0)
+        options.setdefault("top_p", 1)
+        options.setdefault("max_tokens", 512)
+        options.setdefault("seed", 7)
+
+        # Base rules always exist
+        base_rules = _build_system_rules(model)
+        merged_system = base_rules if not upstream_system else f"{base_rules}\n\n{upstream_system}"
+
+        if messages is None:
+            messages = [{"role": "user", "content": prompt}]
+
+        # Ensure system is present / prefixed
+        messages = self._ensure_system_rules(messages, merged_system)
+
+        payload = {"messages": messages}
+        if model:
+            payload["model"] = model
+        payload.setdefault("cache_prompt", False)
+        payload.update(options)
+        return payload
+
+    def _build_payload(self, prompt: str, params: dict[str, Any]) -> dict[str, Any]:
+        options = dict(params)
+        options.pop("role", None)
+        options.pop("stream_callback", None)
+
+        # NEW: accept upstream system_prompt
+        upstream_system = options.pop("system_prompt", None)
+        if upstream_system is not None and not isinstance(upstream_system, str):
+            upstream_system = str(upstream_system)
+
+        messages = options.pop("messages", None)
+        model = options.pop("model", self.model)
+
+        options.setdefault("temperature", 0)
+        options.setdefault("top_p", 1)
+        options.setdefault("max_tokens", 512)
+        options.setdefault("seed", 7)
+
+        # Base rules always exist
+        base_rules = _build_system_rules(model)
+        merged_system = base_rules if not upstream_system else f"{base_rules}\n\n{upstream_system}"
+
+        if messages is None:
+            messages = [{"role": "user", "content": prompt}]
+
+        # Ensure system is present / prefixed
+        messages = self._ensure_system_rules(messages, merged_system)
+
+        payload = {"messages": messages}
+        if model:
+            payload["model"] = model
+        payload.setdefault("cache_prompt", False)
+        payload.update(options)
+        return payload
+
+
 
     @staticmethod
     def _extract_content(data: dict[str, Any]) -> str:
