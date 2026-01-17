@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import urllib.request
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Iterator
 
@@ -13,6 +15,8 @@ from spectator.prompts import load_prompt
 
 _DEFAULT_LLAMA_RULES_PROMPT = "system/llama_rules.txt"
 _ENV_LLAMA_RULES_PROMPT = "SPECTATOR_LLAMA_RULES_PROMPT"
+_ENV_LLAMA_LOG_PAYLOAD = "SPECTATOR_LLAMA_LOG_PAYLOAD"
+_ENV_LLAMA_LOG_DIR = "SPECTATOR_LLAMA_LOG_DIR"
 
 
 def _load_llama_rules() -> str:
@@ -126,6 +130,32 @@ class LlamaServerBackend:
             if stripped.startswith("data:"):
                 yield stripped[len("data:") :].strip()
 
+    @staticmethod
+    def _log_payload(payload: dict[str, Any]) -> None:
+        if not _env_bool(_ENV_LLAMA_LOG_PAYLOAD, False):
+            return
+        pretty_payload = json.dumps(payload, indent=2)
+        log_dir = os.getenv(_ENV_LLAMA_LOG_DIR)
+        if log_dir:
+            log_path = Path(log_dir)
+            log_path.mkdir(parents=True, exist_ok=True)
+            pid = os.getpid()
+            for _ in range(5):
+                timestamp = time.time_ns()
+                filename = f"llama_payload_{timestamp}_{pid}.json"
+                payload_path = log_path / filename
+                try:
+                    with payload_path.open("x", encoding="utf-8") as handle:
+                        handle.write(pretty_payload)
+                    return
+                except FileExistsError:
+                    continue
+            logging.getLogger(__name__).warning(
+                "Failed to write llama payload log after multiple attempts."
+            )
+            return
+        logging.getLogger(__name__).info("Llama request payload:\n%s", pretty_payload)
+
     def _open_stream(self, url: str, payload: dict[str, Any]) -> Iterator[str]:
         data = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(url, data=data, headers=self._headers(), method="POST")
@@ -165,6 +195,7 @@ class LlamaServerBackend:
     def complete(self, prompt: str, params: dict[str, Any] | None = None) -> str:
         params = params or {}
         payload = self._build_payload(prompt, params)
+        self._log_payload(payload)
         stream = bool(payload.get("stream"))
         stream_callback = params.get("stream_callback")
         url = f"{self.base_url.rstrip('/')}/v1/chat/completions"
