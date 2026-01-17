@@ -9,10 +9,23 @@ from typing import Any, Iterable, Iterator
 from spectator.backends.registry import register_backend
 
 SYSTEM_RULES = (
-    "You are Spectator. Do not reveal chain-of-thought. "
+    "You are Spectator. "
+    "Never claim to be Anthropic, OpenAI, Alibaba, Qwen, or any other vendor. "
+    "Your identity is: Spectator. "
+    "If asked about the underlying model, follow the guidance below. "
+    "Do not reveal chain-of-thought. "
     "Do not output internal scaffolding like STATE/UPSTREAM/USER. "
     "Output only the final user-facing answer."
 )
+
+
+def _build_system_rules(model: str | None) -> str:
+    model_line = (
+        f"The underlying model is {model}."
+        if model
+        else "The underlying model is unknown."
+    )
+    return f"{SYSTEM_RULES} {model_line}"
 
 
 def _env_float(name: str, default: float) -> float:
@@ -45,7 +58,7 @@ class LlamaServerBackend:
         model = options.pop("model", self.model)
         if messages is None:
             messages = [
-                {"role": "system", "content": SYSTEM_RULES},
+                {"role": "system", "content": _build_system_rules(model)},
                 {"role": "user", "content": prompt},
             ]
         payload = {"messages": messages}

@@ -191,5 +191,9 @@ def test_pipeline_traces_visible_response(tmp_path) -> None:
 
     trace_lines = tracer.path.read_text(encoding="utf-8").strip().splitlines()
     llm_done = [line for line in trace_lines if '"kind": "llm_done"' in line][0]
+    visible_response = [
+        line for line in trace_lines if '"kind": "visible_response"' in line
+    ][0]
     assert "<think>secret</think>Visible" in llm_done
+    assert '"visible_response": "Visible"' in visible_response
     assert final_text == "Visible"

@@ -7,7 +7,7 @@ from typing import Any, Iterable
 
 from spectator.core.telemetry import TelemetrySnapshot, collect_basic_telemetry
 from spectator.core.tracing import TraceEvent
-from spectator.core.types import Checkpoint, State
+from spectator.core.types import ChatMessage, Checkpoint, State
 from spectator.runtime.capabilities import apply_permission_actions
 from spectator.runtime.condense import CondensePolicy, condense_state, condense_upstream
 from spectator.runtime.memory_feedback import compute_memory_pressure, format_memory_feedback
@@ -69,10 +69,25 @@ def _format_tool_results(results: list[ToolResult]) -> str:
     return "TOOL_RESULTS:\n" + "\n".join(lines)
 
 
+def _format_history(
+    messages: Iterable[ChatMessage],
+    max_messages: int = 8,
+    max_chars: int = 2000,
+) -> str:
+    filtered = [message for message in messages if message.role in {"user", "assistant"}]
+    if max_messages > 0:
+        filtered = filtered[-max_messages:]
+    text = "\n".join(f"{message.role}: {message.content}" for message in filtered)
+    if max_chars > 0 and len(text) > max_chars:
+        text = text[-max_chars:]
+    return text
+
+
 def _compose_prompt(
     role: RoleSpec,
     state: State,
     upstream: list[RoleResult],
+    history: str,
     user_text: str,
     telemetry: TelemetrySnapshot | None,
     memory_feedback: str | None,
@@ -97,6 +112,8 @@ def _compose_prompt(
         parts.append(memory_feedback)
     if retrieval_block and role.wants_retrieval:
         parts.append(retrieval_block)
+    history_text = history or "(empty)"
+    parts.append(f"HISTORY:\n{history_text}")
     if upstream:
         upstream_text = "\n".join(f"{result.role}: {result.text}" for result in upstream)
         parts.append(f"UPSTREAM:\n{upstream_text}")
@@ -124,6 +141,7 @@ def run_pipeline(
     memory_pressure_traced = False
     retrieval_block = None
     retrieval_roles = [role.name for role in role_list if role.wants_retrieval]
+    history_text = _format_history(checkpoint.recent_messages)
     if memory is not None and retrieval_roles:
         from spectator.memory.retrieval import format_retrieval_block, retrieve
 
@@ -217,6 +235,7 @@ def run_pipeline(
             role,
             checkpoint.state,
             results,
+            history_text,
             user_text,
             telemetry_snapshot,
             memory_feedback_block,
@@ -339,6 +358,14 @@ def run_pipeline(
                 )
             )
         visible_text = sanitized_text
+        if tracer is not None:
+            tracer.write(
+                TraceEvent(
+                    ts=time.time(),
+                    kind="visible_response",
+                    data={"role": role.name, "visible_response": visible_text},
+                )
+            )
         if patch is not None:
             _apply_notes_patch(checkpoint.state, patch)
             if patch.actions:
