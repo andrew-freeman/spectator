@@ -17,3 +17,9 @@ def test_trace_writer_emits_jsonl(tmp_path: Path) -> None:
     assert parsed["kind"] == "note"
     assert parsed["ts"] == 123.0
     assert parsed["data"] == {"ok": True}
+
+
+def test_trace_writer_path_includes_run_id(tmp_path: Path) -> None:
+    writer = TraceWriter("session-2", base_dir=tmp_path / "data" / "traces", run_id="rev-3")
+
+    assert writer.path.name == "session-2__rev-3.jsonl"

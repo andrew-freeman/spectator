@@ -28,7 +28,8 @@ def run_turn(
         RoleSpec(name="governor", system_prompt="Decide on the final response."),
     ]
 
-    tracer = TraceWriter(session_id, base_dir=data_root / "traces")
+    run_id = f"rev-{checkpoint.revision + 1}"
+    tracer = TraceWriter(session_id, base_dir=data_root / "traces", run_id=run_id)
     final_text, _results, updated_checkpoint = run_pipeline(
         checkpoint,
         user_text,
@@ -42,6 +43,10 @@ def run_turn(
         ChatMessage(role="assistant", content=final_text)
     )
     if tracer.path.exists():
-        updated_checkpoint.trace_tail = [tracer.path.name]
+        trace_name = tracer.path.name
+        if trace_name not in updated_checkpoint.trace_tail:
+            updated_checkpoint.trace_tail.append(trace_name)
+        if len(updated_checkpoint.trace_tail) > 20:
+            updated_checkpoint.trace_tail = updated_checkpoint.trace_tail[-20:]
     checkpoints.save_checkpoint(updated_checkpoint, base_dir=checkpoint_dir)
     return final_text

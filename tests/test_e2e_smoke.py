@@ -39,7 +39,7 @@ def test_e2e_smoke_controller(tmp_path: Path) -> None:
     assert payload["session_id"] == "smoke-1"
     assert len(payload["recent_messages"]) == 2
 
-    trace_path = base_dir / "traces" / "smoke-1.jsonl"
+    trace_path = base_dir / "traces" / "smoke-1__rev-1.jsonl"
     assert trace_path.exists()
     trace_kinds = {
         json.loads(line)["kind"] for line in trace_path.read_text(encoding="utf-8").splitlines()
