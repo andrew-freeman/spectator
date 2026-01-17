@@ -7,16 +7,15 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Iterator
 
 from spectator.backends.registry import register_backend
+from spectator.prompts import load_prompt
 
-SYSTEM_RULES = (
-    "You are Spectator. "
-    "Never claim to be Anthropic, OpenAI, Alibaba, Qwen, or any other vendor. "
-    "Your identity is: Spectator. "
-    "If asked about the underlying model, follow the guidance below. "
-    "Do not reveal chain-of-thought. "
-    "Do not output internal scaffolding like STATE/UPSTREAM/USER. "
-    "Output only the final user-facing answer."
-)
+_DEFAULT_LLAMA_RULES_PROMPT = "system/llama_rules.txt"
+_ENV_LLAMA_RULES_PROMPT = "SPECTATOR_LLAMA_RULES_PROMPT"
+
+
+def _load_llama_rules() -> str:
+    rel_path = os.getenv(_ENV_LLAMA_RULES_PROMPT, _DEFAULT_LLAMA_RULES_PROMPT)
+    return load_prompt(rel_path)
 
 
 def _build_system_rules(model: str | None) -> str:
@@ -25,7 +24,7 @@ def _build_system_rules(model: str | None) -> str:
         if model
         else "The underlying model is unknown."
     )
-    return f"{SYSTEM_RULES} {model_line}"
+    return f"{_load_llama_rules()} {model_line}"
 
 
 def _env_float(name: str, default: float) -> float:
