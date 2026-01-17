@@ -8,6 +8,7 @@ from typing import Any, Iterable
 from spectator.core.telemetry import TelemetrySnapshot, collect_basic_telemetry
 from spectator.core.tracing import TraceEvent
 from spectator.core.types import ChatMessage, Checkpoint, State
+from spectator.backends.llama_server import LlamaServerBackend, build_system_rules
 from spectator.runtime.capabilities import apply_permission_actions
 from spectator.runtime.condense import CondensePolicy, condense_state, condense_upstream
 from spectator.runtime.memory_feedback import compute_memory_pressure, format_memory_feedback
@@ -110,8 +111,12 @@ def _compose_prompt(
     telemetry: TelemetrySnapshot | None,
     memory_feedback: str | None,
     retrieval_block: str | None,
+    include_system_prompt: bool = True,
 ) -> str:
-    parts = [role.system_prompt, f"STATE:\n{_compact_state(state)}"]
+    parts: list[str] = []
+    if include_system_prompt and role.system_prompt:
+        parts.append(role.system_prompt)
+    parts.append(f"STATE:\n{_compact_state(state)}")
     if telemetry is not None and role.telemetry == "basic":
         telemetry_text = "\n".join(
             [
@@ -137,6 +142,20 @@ def _compose_prompt(
         parts.append(f"UPSTREAM:\n{upstream_text}")
     parts.append(f"USER:\n{user_text}")
     return "\n\n".join(part for part in parts if part)
+
+
+def _build_system_message(
+    role: RoleSpec,
+    backend,
+    params: dict[str, Any],
+) -> str:
+    if isinstance(backend, LlamaServerBackend):
+        model = params.get("model") or backend.model
+        rules = build_system_rules(model)
+        if role.system_prompt:
+            return f"{rules}\n\n{role.system_prompt}"
+        return rules
+    return role.system_prompt
 
 
 def run_pipeline(
@@ -249,7 +268,10 @@ def run_pipeline(
         memory_feedback_block = (
             format_memory_feedback(pressure) if role.memory_feedback == "basic" else None
         )
-        prompt = _compose_prompt(
+        params = dict(role.params)
+        params.setdefault("role", role.name)
+        use_messages = bool(getattr(backend, "supports_messages", False))
+        user_prompt = _compose_prompt(
             role,
             checkpoint.state,
             results,
@@ -258,19 +280,30 @@ def run_pipeline(
             telemetry_snapshot,
             memory_feedback_block,
             retrieval_block,
+            include_system_prompt=False,
         )
-        params = dict(role.params)
-        params.setdefault("role", role.name)
-        def _complete(request_prompt: str) -> str:
+        system_prompt = None
+        if use_messages:
+            system_prompt = _build_system_message(role, backend, params)
+        prompt = user_prompt
+        if not use_messages and role.system_prompt:
+            prompt = "\n\n".join([role.system_prompt, user_prompt]) if user_prompt else role.system_prompt
+
+        def _complete(request_prompt: str, messages: list[dict[str, str]] | None = None) -> str:
             if tracer is not None:
+                data = {"role": role.name, "prompt": request_prompt}
+                if messages:
+                    data["system_prompt"] = messages[0]["content"]
                 tracer.write(
                     TraceEvent(
                         ts=time.time(),
                         kind="llm_req",
-                        data={"role": role.name, "prompt": request_prompt},
+                        data=data,
                     )
                 )
             payload = dict(params)
+            if messages is not None:
+                payload["messages"] = messages
             if payload.get("stream"):
                 def _on_stream(delta: str) -> None:
                     if tracer is not None:
@@ -297,7 +330,13 @@ def run_pipeline(
                 )
             return completion
 
-        response = _complete(prompt)
+        initial_messages = None
+        if use_messages and system_prompt is not None:
+            initial_messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+        response = _complete(prompt, messages=initial_messages)
         final_response = response
         if role.name == "governor" and max_tool_rounds > 1:
             visible_text, tool_calls = extract_tool_calls(response)
@@ -343,7 +382,15 @@ def run_pipeline(
                         )
                     )
                 tool_results_block = _format_tool_results(tool_results)
-                response = _complete(f"{prompt}\n\n{tool_results_block}")
+                tool_prompt = f"{prompt}\n\n{tool_results_block}"
+                tool_messages = None
+                if use_messages and system_prompt is not None:
+                    tool_messages = [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"{user_prompt}\n\n{tool_results_block}"},
+                    ]
+                    tool_prompt = tool_messages[1]["content"]
+                response = _complete(tool_prompt, messages=tool_messages)
                 final_response, ignored_calls = extract_tool_calls(response)
                 if ignored_calls and tracer is not None:
                     tracer.write(
