@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Iterable, List
 
+from spectator.backends.registry import register_backend
+
 
 @dataclass(slots=True)
 class FakeBackend:
@@ -25,3 +27,10 @@ class FakeBackend:
 
     def extend_role_responses(self, role: str, responses: Iterable[str]) -> None:
         self.role_responses.setdefault(role, []).extend(responses)
+
+
+def _factory(**_kwargs: Any) -> "FakeBackend":
+    return FakeBackend()
+
+
+register_backend("fake", _factory)
