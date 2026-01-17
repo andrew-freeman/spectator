@@ -13,7 +13,6 @@ set -euo pipefail
 
 BACKEND="${BACKEND:-llama}"
 PYTHON="${PYTHON:-python}"
-#SPECTATOR_CMD="${SPECTATOR_CMD:-$PYTHON -m spectator}"
 SPECTATOR_PY="${SPECTATOR_PY:-$PYTHON}"
 SPECTATOR_MOD="${SPECTATOR_MOD:-spectator}"
 
