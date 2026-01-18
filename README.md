@@ -159,6 +159,25 @@ Future work (v2.0+) will be clearly separated from v1.x stability.
 
 ---
 
+## Admin/debug UI
+
+Spectator includes a minimal FastAPI-based admin UI for inspecting JSONL traces.
+
+```bash
+uvicorn spectator.admin.app:create_app --factory --port 8000
+```
+
+Set `DATA_ROOT` to point at your data directory, and optionally set
+`SPECTATOR_ADMIN_TOKEN` to require an `X-Admin-Token` header for access.
+
+To run the admin tests locally:
+
+```bash
+pip install -e ".[admin]" && pytest -m admin
+```
+
+---
+
 ## Design philosophy
 
 > **Stability is a feature.**

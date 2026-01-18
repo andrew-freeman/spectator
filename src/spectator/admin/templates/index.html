@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Spectator Admin</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header class="header">
+      <h1>Spectator Admin</h1>
+      <div class="header__hint">JSONL trace inspector</div>
+    </header>
+    <div class="layout">
+      <aside class="sidebar">
+        <h2>Sessions</h2>
+        <div id="sessions" class="list"></div>
+      </aside>
+      <aside class="sidebar">
+        <h2>Runs</h2>
+        <div id="runs" class="list"></div>
+      </aside>
+      <main class="content">
+        <section class="panel">
+          <h2>Final response</h2>
+          <pre id="final-response" class="code"></pre>
+        </section>
+        <section class="panel">
+          <h2>Timeline</h2>
+          <div id="timeline" class="list"></div>
+        </section>
+        <section class="panel">
+          <h2>Per-role events</h2>
+          <div id="per-role"></div>
+        </section>
+        <section class="panel">
+          <h2>Tool calls</h2>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Tool</th>
+                <th>Role</th>
+                <th>OK</th>
+                <th>Duration (ms)</th>
+                <th>Error</th>
+              </tr>
+            </thead>
+            <tbody id="tools"></tbody>
+          </table>
+        </section>
+        <section class="panel">
+          <h2>Sanitize warnings</h2>
+          <div id="sanitize-warnings" class="list"></div>
+        </section>
+      </main>
+    </div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
