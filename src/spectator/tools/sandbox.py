@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Iterable, Optional, Tuple
+import shlex  
 
 def _is_within_root(root: Path, target: Path) -> bool:
     try:
@@ -48,6 +49,17 @@ def validate_shell_cmd(
     allowed_prefixes: Iterable[str],
     deny_substrings: Iterable[str],
 ) -> Tuple[bool, Optional[str]]:
+    """
+    Validate a shell command against a conservative safety policy.
+
+    Rules:
+      - cmd must be a non-empty string
+      - no shell metacharacters (; | & > < ` $() newlines)
+      - command must parse cleanly via shlex
+      - first token must be in allowed_prefixes
+      - deny_substrings are matched against *tokens*, not raw text
+    """
+
     if not isinstance(cmd, str):
         return False, "cmd must be a string"
 
@@ -55,29 +67,41 @@ def validate_shell_cmd(
     if not s:
         return False, "empty command"
 
-    # Cheap reject of obvious shell metacharacters (tighten as needed)
-    # This prevents `rm -rf /; echo ok`, pipes, redirects, subshells, etc.
+    # Reject obvious shell metacharacters early
+    # Prevents chaining, pipes, redirects, subshells, etc.
     forbidden_chars = ["|", ";", "&", ">", "<", "`", "$(", "\n"]
     if any(ch in s for ch in forbidden_chars):
         return False, "shell metacharacters are not allowed"
 
-    # Parse tokens safely; if it fails, reject
+    # Parse command safely
     try:
         tokens = shlex.split(s)
-    except ValueError:
+    except Exception:
         return False, "failed to parse command"
 
     if not tokens:
         return False, "empty command"
 
+    # Validate command name
     first = tokens[0]
-    allowed = set(allowed_prefixes)
+    allowed = {p for p in allowed_prefixes}
     if first not in allowed:
         return False, f"command '{first}' not allowed"
 
-    lower = s.lower()
-    for bad in deny_substrings:
-        if bad.lower() in lower:
-            return False, f"disallowed substring: {bad}"
+    # Normalize deny rules
+    deny_set = {d.lower() for d in deny_substrings}
+    token_lowers = [t.lower() for t in tokens]
+
+    # Reject explicitly denied tokens
+    for tok in token_lowers:
+        if tok in deny_set:
+            return False, f"disallowed token: {tok}"
+
+    # Extra safety: reject tokens that *start* with dangerous prefixes
+    # (e.g. rm -rf, dd if=, mkfs.ext4, etc.)
+    for tok in token_lowers:
+        for bad in deny_set:
+            if tok.startswith(bad):
+                return False, f"disallowed token prefix: {bad}"
 
     return True, None

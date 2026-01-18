@@ -45,7 +45,11 @@ def shell_exec_handler(root: Path) -> Any:
         if not isinstance(timeout_s, (int, float)) or timeout_s <= 0:
             raise ValueError("timeout_s must be positive")
 
-        ok, reason = validate_shell_cmd(cmd, ALLOWED_PREFIXES, DENY_SUBSTRINGS)
+#        ok, reason = validate_shell_cmd(cmd, ALLOWED_PREFIXES, DENY_SUBSTRINGS)
+        try:
+            ok, reason = validate_shell_cmd(cmd, ALLOWED_PREFIXES, DENY_SUBSTRINGS)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"command rejected (validator error): {exc}") from exc
         if not ok:
             raise ValueError(reason or "command rejected")
 
