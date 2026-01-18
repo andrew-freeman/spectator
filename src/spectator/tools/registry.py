@@ -52,9 +52,9 @@ def build_default_registry(
 
     # HTTP tool (only if available)
     if http_get_handler is not None:
-        reg.register("http.get", http_get_handler(root, settings=settings))
+        reg.register("http.get", http_get_handler(settings))
 
-    executor = ToolExecutor(reg)
+    executor = ToolExecutor(root, reg, settings)
     return reg, executor
 
 class ToolRegistry:
