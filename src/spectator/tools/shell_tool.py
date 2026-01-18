@@ -19,7 +19,20 @@ ALLOWED_PREFIXES = [
     "head",
     "tail",
 ]
-DENY_SUBSTRINGS = ["rm", "sudo", "chmod", "chown", "mkfs", "dd ", ":(){", ">/dev/sd", "curl", "wget"]
+DENY_SUBSTRINGS = [
+    "rm ",
+    " rm",
+    "sudo",
+    "chmod",
+    "chown",
+    "mkfs",
+    "dd ",
+    ":(){",
+    ">/dev/sd",
+    "curl",
+    "wget",
+]
+
 MAX_OUTPUT_CHARS = 20000
 
 

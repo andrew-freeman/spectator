@@ -7,6 +7,8 @@ from spectator.tools.sandbox import resolve_under_root
 
 
 def _get_path(root: Path, user_path: str) -> Path:
+    if "\x00" in user_path:
+        raise ValueError("path contains NUL byte")
     resolved = resolve_under_root(root, user_path)
     if resolved is None:
         raise ValueError("path escapes sandbox")
