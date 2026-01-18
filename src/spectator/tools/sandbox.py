@@ -67,11 +67,22 @@ def validate_shell_cmd(
     if not s:
         return False, "empty command"
 
-    # Reject obvious shell metacharacters early
+    # Reject obvious shell metacharacters early (outside of quotes where relevant)
     # Prevents chaining, pipes, redirects, subshells, etc.
-    forbidden_chars = ["|", ";", "&", ">", "<", "`", "$(", "\n"]
-    if any(ch in s for ch in forbidden_chars):
-        return False, "shell metacharacters are not allowed"
+    in_quote: str | None = None
+    for ch in s:
+        if ch in {"'", '"'}:
+            if in_quote == ch:
+                in_quote = None
+            elif in_quote is None:
+                in_quote = ch
+            continue
+        if ch in {"$", "`", "\n"}:
+            return False, "shell metacharacters are not allowed"
+        if ch in {"|", "&", ">", "<"}:
+            return False, "shell metacharacters are not allowed"
+        if ch == ";" and in_quote is None:
+            return False, "shell metacharacters are not allowed"
 
     # Parse command safely
     try:

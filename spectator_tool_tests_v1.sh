@@ -27,6 +27,12 @@ mkdir -p "$OUTDIR"
 
 log() { printf '%s\n' "$*" | tee -a "$SESSION_DIR/harness_tool.log" >/dev/null; }
 
+if [[ -n "${PYTHONPATH:-}" ]]; then
+  export PYTHONPATH="$ROOT/src:$PYTHONPATH"
+else
+  export PYTHONPATH="$ROOT/src"
+fi
+
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
     echo "Missing required command: $1" >&2
