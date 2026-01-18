@@ -39,6 +39,20 @@ def _write_trace(path: Path) -> None:
             "data": {"role": "governor", "id": "tool-1", "tool": "http_get", "ok": True, "error": None, "duration_ms": 8.0},
         },
         {
+            "ts": 2.5,
+            "kind": "llm_req",
+            "data": {
+                "role": "planner",
+                "system_prompt": "system prompt",
+                "prompt": "STATE:\nstate payload\nUSER:\nuser payload",
+            },
+        },
+        {
+            "ts": 2.8,
+            "kind": "llm_done",
+            "data": {"role": "planner", "response": "response payload"},
+        },
+        {
             "ts": 3.0,
             "kind": "visible_response",
             "data": {"role": "governor", "visible_response": "Done"},
@@ -72,3 +86,5 @@ def test_admin_api_lists_sessions_and_runs(tmp_path: Path) -> None:
     run_detail = client.get(f"/api/sessions/{session_id}/runs/{run_id}").json()
     assert run_detail["final_response"] == "Done"
     assert run_detail["tool_calls"][0]["tool"] == "http_get"
+    assert run_detail["per_role"][0]["prompt_sections"]["USER"] == "user payload"
+    assert run_detail["per_role"][0]["llm_done"]["data"]["response"] == "response payload"

@@ -1,8 +1,45 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
+
+
+_PROMPT_HEADER_RE = re.compile(r"^([A-Z_]+):\s*$")
+
+
+def _parse_prompt_sections(prompt: str) -> dict[str, str]:
+    sections: dict[str, str] = {}
+    current_header: str | None = None
+    buffer: list[str] = []
+
+    def flush() -> None:
+        nonlocal buffer
+        if current_header is None:
+            return
+        text = "\n".join(buffer).strip("\n")
+        sections[current_header] = text
+        buffer = []
+
+    for line in prompt.splitlines():
+        match = _PROMPT_HEADER_RE.match(line)
+        if match:
+            flush()
+            current_header = match.group(1)
+            continue
+        if current_header is not None:
+            buffer.append(line)
+    flush()
+    return sections
+
+
+def _pretty_history_json(raw_text: str) -> str:
+    try:
+        parsed = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return raw_text
+    return json.dumps(parsed, indent=2, ensure_ascii=False)
 
 
 def _parse_line(line: str) -> dict[str, Any] | None:
@@ -27,6 +64,7 @@ def _extract_role(event: dict[str, Any]) -> str | None:
 def parse_trace_file(path: Path) -> dict[str, Any]:
     events: list[dict[str, Any]] = []
     events_by_role: dict[str, list[dict[str, Any]]] = {}
+    per_role: dict[str, dict[str, Any]] = {}
     tool_calls: dict[str, dict[str, Any]] = {}
     sanitize_events: list[dict[str, Any]] = []
     sanitize_warnings: list[dict[str, Any]] = []
@@ -36,6 +74,7 @@ def parse_trace_file(path: Path) -> dict[str, Any]:
         return {
             "events": [],
             "events_by_role": {},
+            "per_role": [],
             "tool_calls": [],
             "sanitize": [],
             "sanitize_warnings": [],
@@ -60,6 +99,31 @@ def parse_trace_file(path: Path) -> dict[str, Any]:
         events.append(event)
         if role is not None:
             events_by_role.setdefault(role, []).append(event)
+
+        if kind in {"llm_req", "llm_done"} and role is not None:
+            entry = per_role.setdefault(
+                role,
+                {
+                    "role": role,
+                    "llm_req": None,
+                    "llm_done": None,
+                    "prompt_sections": {},
+                    "history_json_pretty": None,
+                },
+            )
+            if kind == "llm_req":
+                entry["llm_req"] = event
+                prompt = data.get("prompt")
+                if isinstance(prompt, str):
+                    sections = _parse_prompt_sections(prompt)
+                    entry["prompt_sections"] = sections
+                    history_section = sections.get("HISTORY_JSON")
+                    if isinstance(history_section, str):
+                        entry["history_json_pretty"] = _pretty_history_json(
+                            history_section
+                        )
+            if kind == "llm_done":
+                entry["llm_done"] = event
 
         if kind == "tool_start" and isinstance(data, dict):
             tool_id = data.get("id")
@@ -128,10 +192,13 @@ def parse_trace_file(path: Path) -> dict[str, Any]:
 
     tool_calls_list = list(tool_calls.values())
     tool_calls_list.sort(key=lambda item: item.get("id") or "")
+    per_role_list = list(per_role.values())
+    per_role_list.sort(key=lambda item: item.get("role") or "")
 
     return {
         "events": events,
         "events_by_role": events_by_role,
+        "per_role": per_role_list,
         "tool_calls": tool_calls_list,
         "sanitize": sanitize_events,
         "sanitize_warnings": sanitize_warnings,

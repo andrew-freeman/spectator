@@ -76,6 +76,15 @@ body {
   color: #cbd1da;
 }
 
+.list__row--link {
+  background: none;
+  border: none;
+  color: #8fc1ff;
+  cursor: pointer;
+  padding: 0.3rem 0;
+  text-align: left;
+}
+
 .code {
   white-space: pre-wrap;
   background: #0f1115;
@@ -99,4 +108,81 @@ body {
 
 .role {
   margin-bottom: 1rem;
+}
+
+.role__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.role__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.role__content {
+  margin-top: 0.5rem;
+}
+
+.role__response {
+  margin-top: 1rem;
+}
+
+.button {
+  background: #1b2231;
+  color: inherit;
+  border: 1px solid #2a2f3a;
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+}
+
+.button--small {
+  font-size: 0.8rem;
+}
+
+.collapsible {
+  border: 1px solid #2a2f3a;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.75rem;
+  background: #101520;
+}
+
+.collapsible__summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-weight: 600;
+}
+
+.collapsible__preview {
+  font-weight: 400;
+  color: #9aa4b3;
+  font-size: 0.85rem;
+  max-width: 600px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.prompt__section {
+  padding: 0.5rem 0;
+}
+
+.prompt__title {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+  color: #d7dbe3;
 }
