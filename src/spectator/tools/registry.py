@@ -28,6 +28,7 @@ def build_default_registry(
     from spectator.tools.settings import ToolSettings, default_tool_settings
     from spectator.tools.fs_tools import read_text_handler, write_text_handler, list_dir_handler
     from spectator.tools.shell_tool import shell_exec_handler
+    from spectator.tools.time_tool import system_time_handler
 
     # http tool is optional depending on your repo state; import lazily
     try:
@@ -49,6 +50,9 @@ def build_default_registry(
 
     # Shell tool
     reg.register("shell.exec", shell_exec_handler(root))
+
+    # System time tool
+    reg.register("system.time", system_time_handler())
 
     # HTTP tool (only if available)
     if http_get_handler is not None:

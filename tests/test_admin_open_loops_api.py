@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -93,3 +94,37 @@ def test_admin_open_loops_run_endpoint(tmp_path: Path) -> None:
     assert payload["run_id"]
     open_loops = payload["open_loops"]
     assert any(loop.get("id") == loop_id for loop in open_loops)
+
+
+def test_admin_open_loops_run_closes_with_notes(tmp_path: Path, monkeypatch) -> None:
+    data_root = tmp_path / "data"
+    checkpoint_dir = data_root / "checkpoints"
+    checkpoint_dir.mkdir(parents=True)
+
+    session_id = "session-3"
+    _write_checkpoint(checkpoint_dir / f"{session_id}.json", session_id)
+
+    client = TestClient(create_app(data_root=data_root))
+
+    create_resp = client.post(
+        f"/api/sessions/{session_id}/open_loops",
+        json={"title": "Report time"},
+    )
+    loop_id = create_resp.json()["open_loops"][0]["id"]
+
+    responses = {
+        "governor": [
+            "Done.\n"
+            "<<<NOTES_JSON>>>\n"
+            f"{{\"close_open_loops\":[\"{loop_id}\"]}}\n"
+            "<<<END_NOTES_JSON>>>\n"
+        ]
+    }
+    monkeypatch.setenv("SPECTATOR_FAKE_ROLE_RESPONSES", json.dumps(responses))
+
+    run_resp = client.post(
+        f"/api/sessions/{session_id}/open_loops/run",
+        json={"backend": "fake"},
+    )
+    assert run_resp.status_code == 200
+    assert run_resp.json()["open_loops"] == []

@@ -210,8 +210,11 @@ def create_app(data_root: Path | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="no open loops to run")
 
         lines = [
-            "Please resolve the following open loops. For each item, do the work and then close it",
-            "using NOTES_JSON close_open_loops with the loop id.",
+            "Please resolve the following open loops. For each item, do the work and then close it.",
+            "Emit a NOTES_JSON block with close_open_loops as a list of loop ids, using the exact markers:",
+            "<<<NOTES_JSON>>>",
+            "{\"close_open_loops\":[\"loop-id\"]}",
+            "<<<END_NOTES_JSON>>>",
             "",
         ]
         for loop in loops:
