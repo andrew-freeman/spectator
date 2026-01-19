@@ -27,6 +27,7 @@
         <nav class="tabs" role="tablist" aria-label="Admin tabs">
           <button class="tab tab--active" role="tab" aria-selected="true" aria-controls="tab-inspect" id="tab-button-inspect" type="button">Inspect</button>
           <button class="tab" role="tab" aria-selected="false" aria-controls="tab-loops" id="tab-button-loops" type="button">Loops</button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="tab-introspect" id="tab-button-introspect" type="button">Introspect</button>
           <button class="tab" role="tab" aria-selected="false" aria-controls="tab-chat" id="tab-button-chat" type="button">Chat</button>
         </nav>
         <div id="tab-inspect" class="tab-panel tab-panel--active" role="tabpanel" aria-labelledby="tab-button-inspect">
@@ -129,6 +130,56 @@
           <section class="panel">
             <h2>Open loop list</h2>
             <div id="open-loops-summary" class="list"></div>
+          </section>
+        </div>
+        <div id="tab-introspect" class="tab-panel" role="tabpanel" aria-labelledby="tab-button-introspect">
+          <section class="panel">
+            <div class="panel__header">
+              <h2>Introspection</h2>
+              <div class="panel__meta" id="introspect-status">Idle</div>
+            </div>
+            <div class="controls">
+              <label class="field">
+                <span>Path prefix</span>
+                <input id="introspect-prefix" type="text" placeholder="src/spectator" />
+              </label>
+              <label class="field">
+                <span>List limit</span>
+                <input id="introspect-limit" type="number" min="1" value="200" />
+              </label>
+              <button id="introspect-list" class="button" type="button">List files</button>
+            </div>
+            <div id="introspect-files" class="list"></div>
+          </section>
+          <section class="panel">
+            <h2>Read file</h2>
+            <div class="controls">
+              <label class="field">
+                <span>Path</span>
+                <input id="introspect-path" type="text" placeholder="src/spectator/runtime/pipeline.py" />
+              </label>
+              <label class="field">
+                <span>Tail lines</span>
+                <input id="introspect-lines" type="number" min="1" value="200" />
+              </label>
+              <button id="introspect-read" class="button" type="button">Read tail</button>
+            </div>
+            <pre id="introspect-content" class="code"></pre>
+          </section>
+          <section class="panel">
+            <h2>Summarize</h2>
+            <div class="controls">
+              <label class="field">
+                <span>Backend</span>
+                <input id="introspect-backend" type="text" placeholder="llama" />
+              </label>
+              <label class="field">
+                <span>Instruction</span>
+                <input id="introspect-instruction" type="text" placeholder="Summarize key changes and risks." />
+              </label>
+              <button id="introspect-summarize" class="button button--accent" type="button">Summarize</button>
+            </div>
+            <pre id="introspect-summary" class="code"></pre>
           </section>
         </div>
         <div id="tab-chat" class="tab-panel" role="tabpanel" aria-labelledby="tab-button-chat">

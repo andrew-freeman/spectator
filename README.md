@@ -182,6 +182,12 @@ Open loops endpoints (task tracking):
 * `POST /api/sessions/{session_id}/open_loops`
 * `POST /api/sessions/{session_id}/open_loops/{loop_id}/close`
 
+Introspection endpoints (read-only repo access):
+
+* `GET /api/introspect/list?path=<prefix>&limit=<n>`
+* `GET /api/introspect/read?path=<file>&lines=<n>`
+* `POST /api/introspect/summarize`
+
 ---
 
 ## Design philosophy

@@ -12,6 +12,12 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from spectator.admin.trace_parser import parse_trace_file
+from spectator.analysis.introspection import (
+    list_repo_files,
+    read_repo_file_tail,
+    resolve_repo_root,
+    summarize_repo_file,
+)
 from spectator.runtime.open_loops_admin import (
     add_open_loop,
     close_open_loop,
@@ -35,6 +41,13 @@ class OpenLoopRequest(BaseModel):
 
 class RunOpenLoopsRequest(BaseModel):
     backend: str | None = None
+
+
+class IntrospectSummarizeRequest(BaseModel):
+    path: str
+    backend: str | None = None
+    instruction: str | None = None
+    lines: int | None = None
 
 
 def _resolve_data_root(data_root: Path | None) -> Path:
@@ -69,11 +82,13 @@ def _extract_run_id(session_id: str, filename: str) -> str | None:
 
 def create_app(data_root: Path | None = None) -> FastAPI:
     root = _resolve_data_root(data_root)
+    repo_root = resolve_repo_root()
     template_dir = Path(__file__).resolve().parent / "templates"
     static_dir = Path(__file__).resolve().parent / "static"
 
     app = FastAPI()
     app.state.data_root = root
+    app.state.repo_root = repo_root
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
     templates = Jinja2Templates(directory=str(template_dir))
 
@@ -248,5 +263,38 @@ def create_app(data_root: Path | None = None) -> FastAPI:
             "final_text": final_text,
             "open_loops": updated_loops,
         }
+
+    @app.get("/api/introspect/list")
+    async def list_introspect(path: str | None = None, limit: int = 500) -> dict[str, Any]:
+        files = list_repo_files(repo_root, prefix=path, limit=limit)
+        return {"root": str(repo_root), "files": files}
+
+    @app.get("/api/introspect/read")
+    async def read_introspect(path: str, lines: int = 200) -> dict[str, Any]:
+        try:
+            content = read_repo_file_tail(repo_root, path, max_lines=lines)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"path": path, "lines": lines, "content": content}
+
+    @app.post("/api/introspect/summarize")
+    async def summarize_introspect(
+        payload: IntrospectSummarizeRequest,
+    ) -> dict[str, Any]:
+        path = payload.path
+        backend = payload.backend or "fake"
+        instruction = payload.instruction
+        lines = payload.lines or 200
+        if not isinstance(lines, int) or lines <= 0:
+            raise HTTPException(status_code=400, detail="lines must be positive")
+        result = summarize_repo_file(
+            repo_root,
+            path,
+            data_root=root,
+            backend_name=backend,
+            max_lines=lines,
+            instruction=instruction if isinstance(instruction, str) else None,
+        )
+        return result
 
     return app

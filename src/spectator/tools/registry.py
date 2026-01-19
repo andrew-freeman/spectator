@@ -61,6 +61,23 @@ def build_default_registry(
     executor = ToolExecutor(root, reg, settings)
     return reg, executor
 
+
+def build_readonly_registry(root: Path) -> tuple["ToolRegistry", "ToolExecutor"]:
+    """
+    Construct a read-only registry rooted at `root`.
+    """
+    from spectator.tools.executor import ToolExecutor
+    from spectator.tools.settings import default_tool_settings
+    from spectator.tools.fs_tools import read_text_handler, list_dir_handler
+    from spectator.tools.time_tool import system_time_handler
+
+    reg = ToolRegistry()
+    reg.register("fs.read_text", read_text_handler(root))
+    reg.register("fs.list_dir", list_dir_handler(root))
+    reg.register("system.time", system_time_handler())
+    executor = ToolExecutor(root, reg, default_tool_settings(root))
+    return reg, executor
+
 class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, ToolSpec] = {}

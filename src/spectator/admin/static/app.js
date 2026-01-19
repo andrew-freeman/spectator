@@ -21,9 +21,11 @@ const openLoopTags = document.getElementById("open-loop-tags");
 const openLoopPriority = document.getElementById("open-loop-priority");
 const tabInspectBtn = document.getElementById("tab-button-inspect");
 const tabLoopsBtn = document.getElementById("tab-button-loops");
+const tabIntrospectBtn = document.getElementById("tab-button-introspect");
 const tabChatBtn = document.getElementById("tab-button-chat");
 const tabInspectPanel = document.getElementById("tab-inspect");
 const tabLoopsPanel = document.getElementById("tab-loops");
+const tabIntrospectPanel = document.getElementById("tab-introspect");
 const tabChatPanel = document.getElementById("tab-chat");
 const chatStatusEl = document.getElementById("chat-status");
 const chatLogEl = document.getElementById("chat-log");
@@ -38,6 +40,19 @@ const loopBackendInput = document.getElementById("loop-backend");
 const runOpenLoopsBtn = document.getElementById("run-open-loops");
 const loopRunResultEl = document.getElementById("loop-run-result");
 const openLoopsSummaryEl = document.getElementById("open-loops-summary");
+const introspectStatusEl = document.getElementById("introspect-status");
+const introspectPrefixInput = document.getElementById("introspect-prefix");
+const introspectLimitInput = document.getElementById("introspect-limit");
+const introspectListBtn = document.getElementById("introspect-list");
+const introspectFilesEl = document.getElementById("introspect-files");
+const introspectPathInput = document.getElementById("introspect-path");
+const introspectLinesInput = document.getElementById("introspect-lines");
+const introspectReadBtn = document.getElementById("introspect-read");
+const introspectContentEl = document.getElementById("introspect-content");
+const introspectBackendInput = document.getElementById("introspect-backend");
+const introspectInstructionInput = document.getElementById("introspect-instruction");
+const introspectSummarizeBtn = document.getElementById("introspect-summarize");
+const introspectSummaryEl = document.getElementById("introspect-summary");
 
 let currentSession = null;
 let currentRun = null;
@@ -502,6 +517,113 @@ function renderLoopStats(openLoops) {
   }
 }
 
+function updateIntrospectStatus(text) {
+  if (introspectStatusEl) {
+    introspectStatusEl.textContent = text;
+  }
+}
+
+function renderIntrospectFiles(files) {
+  if (!introspectFilesEl) {
+    return;
+  }
+  clearElement(introspectFilesEl);
+  if (!Array.isArray(files) || files.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "list__row list__row--muted";
+    empty.textContent = "No files found.";
+    introspectFilesEl.appendChild(empty);
+    return;
+  }
+  files.forEach((file) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "list__row list__row--link";
+    row.textContent = file;
+    row.addEventListener("click", () => {
+      if (introspectPathInput) {
+        introspectPathInput.value = file;
+      }
+    });
+    introspectFilesEl.appendChild(row);
+  });
+}
+
+async function listIntrospectFiles() {
+  const prefix = introspectPrefixInput?.value.trim() || "";
+  const limit = Number(introspectLimitInput?.value || 200);
+  updateIntrospectStatus("Listing files...");
+  const params = new URLSearchParams();
+  if (prefix) {
+    params.set("path", prefix);
+  }
+  if (Number.isFinite(limit)) {
+    params.set("limit", String(limit));
+  }
+  const response = await fetch(`/api/introspect/list?${params.toString()}`);
+  if (!response.ok) {
+    updateIntrospectStatus("Failed to list files.");
+    return;
+  }
+  const payload = await response.json();
+  renderIntrospectFiles(payload.files || []);
+  updateIntrospectStatus(`Files: ${payload.files?.length || 0}`);
+}
+
+async function readIntrospectFile() {
+  const path = introspectPathInput?.value.trim();
+  const lines = Number(introspectLinesInput?.value || 200);
+  if (!path) {
+    updateIntrospectStatus("Path required.");
+    return;
+  }
+  updateIntrospectStatus("Reading file...");
+  const params = new URLSearchParams();
+  params.set("path", path);
+  if (Number.isFinite(lines)) {
+    params.set("lines", String(lines));
+  }
+  const response = await fetch(`/api/introspect/read?${params.toString()}`);
+  if (!response.ok) {
+    updateIntrospectStatus("Failed to read file.");
+    return;
+  }
+  const payload = await response.json();
+  if (introspectContentEl) {
+    introspectContentEl.textContent = payload.content || "";
+  }
+  updateIntrospectStatus("Read complete.");
+}
+
+async function summarizeIntrospectFile() {
+  const path = introspectPathInput?.value.trim();
+  const lines = Number(introspectLinesInput?.value || 200);
+  if (!path) {
+    updateIntrospectStatus("Path required.");
+    return;
+  }
+  updateIntrospectStatus("Summarizing...");
+  const payload = {
+    path,
+    lines: Number.isFinite(lines) ? lines : 200,
+    backend: introspectBackendInput?.value.trim() || undefined,
+    instruction: introspectInstructionInput?.value.trim() || undefined,
+  };
+  const response = await fetch("/api/introspect/summarize", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    updateIntrospectStatus("Failed to summarize.");
+    return;
+  }
+  const data = await response.json();
+  if (introspectSummaryEl) {
+    introspectSummaryEl.textContent = data.summary || "";
+  }
+  updateIntrospectStatus(`Summary ready (${data.trace_file || "no trace"})`);
+}
 function renderTimelineKindOptions(events) {
   const kinds = Array.from(new Set(events.map((event) => event.kind))).sort();
   clearElement(timelineKindSelect);
@@ -565,20 +687,27 @@ function ensureChatDefaults(sessions) {
   if (loopBackendInput && !loopBackendTouched && !loopBackendInput.value.trim()) {
     loopBackendInput.value = chatBackendInput?.value.trim() || "llama";
   }
+  if (introspectBackendInput && !introspectBackendInput.value.trim()) {
+    introspectBackendInput.value = "llama";
+  }
 }
 
 function setActiveTab(tab) {
   const isInspect = tab === "inspect";
   const isLoops = tab === "loops";
+  const isIntrospect = tab === "introspect";
   const isChat = tab === "chat";
   tabInspectBtn.classList.toggle("tab--active", isInspect);
   tabLoopsBtn.classList.toggle("tab--active", isLoops);
+  tabIntrospectBtn.classList.toggle("tab--active", isIntrospect);
   tabChatBtn.classList.toggle("tab--active", isChat);
   tabInspectBtn.setAttribute("aria-selected", String(isInspect));
   tabLoopsBtn.setAttribute("aria-selected", String(isLoops));
+  tabIntrospectBtn.setAttribute("aria-selected", String(isIntrospect));
   tabChatBtn.setAttribute("aria-selected", String(isChat));
   tabInspectPanel.classList.toggle("tab-panel--active", isInspect);
   tabLoopsPanel.classList.toggle("tab-panel--active", isLoops);
+  tabIntrospectPanel.classList.toggle("tab-panel--active", isIntrospect);
   tabChatPanel.classList.toggle("tab-panel--active", isChat);
 }
 
@@ -933,9 +1062,10 @@ if (openLoopForm) {
   });
 }
 
-if (tabInspectBtn && tabChatBtn && tabLoopsBtn) {
+if (tabInspectBtn && tabChatBtn && tabLoopsBtn && tabIntrospectBtn) {
   tabInspectBtn.addEventListener("click", () => setActiveTab("inspect"));
   tabLoopsBtn.addEventListener("click", () => setActiveTab("loops"));
+  tabIntrospectBtn.addEventListener("click", () => setActiveTab("introspect"));
   tabChatBtn.addEventListener("click", () => setActiveTab("chat"));
 }
 
@@ -975,6 +1105,24 @@ if (chatClearBtn) {
 if (runOpenLoopsBtn) {
   runOpenLoopsBtn.addEventListener("click", () => {
     runOpenLoops();
+  });
+}
+
+if (introspectListBtn) {
+  introspectListBtn.addEventListener("click", () => {
+    listIntrospectFiles();
+  });
+}
+
+if (introspectReadBtn) {
+  introspectReadBtn.addEventListener("click", () => {
+    readIntrospectFile();
+  });
+}
+
+if (introspectSummarizeBtn) {
+  introspectSummarizeBtn.addEventListener("click", () => {
+    summarizeIntrospectFile();
   });
 }
 

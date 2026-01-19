@@ -9,6 +9,12 @@ from typing import Any
 from spectator.backends import get_backend, list_backends
 from spectator.backends.fake import FakeBackend
 from spectator.analysis.autopsy import autopsy_from_trace, render_autopsy_markdown
+from spectator.analysis.introspection import (
+    list_repo_files,
+    read_repo_file_tail,
+    resolve_repo_root,
+    summarize_repo_file,
+)
 from spectator.runtime import controller
 from spectator.runtime.tool_calls import END_MARKER, START_MARKER
 
@@ -145,6 +151,35 @@ def _autopsy_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _introspect_command(args: argparse.Namespace) -> int:
+    repo_root = resolve_repo_root()
+    data_root = _resolve_data_root()
+    if args.list:
+        files = list_repo_files(repo_root, prefix=args.path, limit=args.limit)
+        print("\n".join(files))
+        return 0
+    if args.read:
+        if not args.path:
+            raise SystemExit("--path required for read")
+        content = read_repo_file_tail(repo_root, args.path, max_lines=args.lines)
+        print(content)
+        return 0
+    if args.summarize:
+        if not args.path:
+            raise SystemExit("--path required for summarize")
+        result = summarize_repo_file(
+            repo_root,
+            args.path,
+            data_root=data_root,
+            backend_name=args.backend,
+            max_lines=args.lines,
+            instruction=args.instruction,
+        )
+        print(result["summary"])
+        return 0
+    raise SystemExit("introspect requires --list, --read, or --summarize")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="spectator")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -175,6 +210,18 @@ def build_parser() -> argparse.ArgumentParser:
     autopsy_parser.add_argument("--checkpoint")
     autopsy_parser.add_argument("--json", action="store_true")
     autopsy_parser.set_defaults(func=_autopsy_command)
+
+    introspect_parser = subparsers.add_parser("introspect", help="Read or summarize repo files")
+    mode = introspect_parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--list", action="store_true")
+    mode.add_argument("--read", action="store_true")
+    mode.add_argument("--summarize", action="store_true")
+    introspect_parser.add_argument("--path")
+    introspect_parser.add_argument("--limit", type=int, default=200)
+    introspect_parser.add_argument("--lines", type=int, default=200)
+    introspect_parser.add_argument("--backend", default="fake")
+    introspect_parser.add_argument("--instruction")
+    introspect_parser.set_defaults(func=_introspect_command)
 
     return parser
 
