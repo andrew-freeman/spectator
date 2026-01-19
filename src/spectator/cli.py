@@ -173,6 +173,7 @@ def _introspect_command(args: argparse.Namespace) -> int:
             data_root=data_root,
             backend_name=args.backend,
             max_lines=args.lines,
+            max_tokens=args.max_tokens,
             instruction=args.instruction,
         )
         print(result["summary"])
@@ -221,6 +222,7 @@ def build_parser() -> argparse.ArgumentParser:
     introspect_parser.add_argument("--lines", type=int, default=200)
     introspect_parser.add_argument("--backend", default="fake")
     introspect_parser.add_argument("--instruction")
+    introspect_parser.add_argument("--max-tokens", type=int, default=1024)
     introspect_parser.set_defaults(func=_introspect_command)
 
     return parser

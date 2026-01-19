@@ -65,6 +65,7 @@ def summarize_repo_file(
     data_root: Path,
     backend_name: str,
     max_lines: int = DEFAULT_TAIL_LINES,
+    max_tokens: int | None = None,
     instruction: str | None = None,
 ) -> dict[str, Any]:
     tail = read_repo_file_tail(repo_root, path, max_lines=max_lines)
@@ -81,10 +82,14 @@ def summarize_repo_file(
     backend = get_backend(backend_name)
     _registry, executor = build_readonly_registry(repo_root)
 
+    params: dict[str, Any] = {}
+    if isinstance(max_tokens, int) and max_tokens > 0:
+        params["max_tokens"] = max_tokens
     roles = [
         RoleSpec(
             name="governor",
             system_prompt=get_role_prompt("governor"),
+            params=params,
         ),
     ]
     checkpoint = Checkpoint(
@@ -107,6 +112,7 @@ def summarize_repo_file(
         "summary": final_text,
         "trace_file": tracer.path.name,
         "tail_lines": max_lines,
+        "max_tokens": max_tokens,
         "path": path,
     }
 

@@ -48,6 +48,7 @@ class IntrospectSummarizeRequest(BaseModel):
     backend: str | None = None
     instruction: str | None = None
     lines: int | None = None
+    max_tokens: int | None = None
 
 
 def _resolve_data_root(data_root: Path | None) -> Path:
@@ -285,14 +286,18 @@ def create_app(data_root: Path | None = None) -> FastAPI:
         backend = payload.backend or "fake"
         instruction = payload.instruction
         lines = payload.lines or 200
+        max_tokens = payload.max_tokens if payload.max_tokens is not None else 1024
         if not isinstance(lines, int) or lines <= 0:
             raise HTTPException(status_code=400, detail="lines must be positive")
+        if max_tokens is not None and (not isinstance(max_tokens, int) or max_tokens <= 0):
+            raise HTTPException(status_code=400, detail="max_tokens must be positive")
         result = summarize_repo_file(
             repo_root,
             path,
             data_root=root,
             backend_name=backend,
             max_lines=lines,
+            max_tokens=max_tokens,
             instruction=instruction if isinstance(instruction, str) else None,
         )
         return result

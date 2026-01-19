@@ -50,6 +50,7 @@ const introspectLinesInput = document.getElementById("introspect-lines");
 const introspectReadBtn = document.getElementById("introspect-read");
 const introspectContentEl = document.getElementById("introspect-content");
 const introspectBackendInput = document.getElementById("introspect-backend");
+const introspectMaxTokensInput = document.getElementById("introspect-max-tokens");
 const introspectInstructionInput = document.getElementById("introspect-instruction");
 const introspectSummarizeBtn = document.getElementById("introspect-summarize");
 const introspectSummaryEl = document.getElementById("introspect-summary");
@@ -607,6 +608,9 @@ async function summarizeIntrospectFile() {
     path,
     lines: Number.isFinite(lines) ? lines : 200,
     backend: introspectBackendInput?.value.trim() || undefined,
+    max_tokens: Number.isFinite(Number(introspectMaxTokensInput?.value || "")) ?
+      Number(introspectMaxTokensInput?.value) :
+      undefined,
     instruction: introspectInstructionInput?.value.trim() || undefined,
   };
   const response = await fetch("/api/introspect/summarize", {
