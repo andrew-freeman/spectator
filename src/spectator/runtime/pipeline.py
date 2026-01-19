@@ -352,9 +352,17 @@ def run_pipeline(
                 {"role": "user", "content": user_content},
             ]
         response = _complete(prompt, messages=initial_messages)
+        allowed_tools: set[str] | None = None
+        if tool_executor is not None:
+            allowed_tools = set(tool_executor.list_tools())
         final_response = response
         if role.name == "governor" and max_tool_rounds > 1:
-            visible_text, tool_calls = extract_tool_calls(response)
+            visible_text, tool_calls = extract_tool_calls(
+                response,
+                tracer=tracer,
+                role=role.name,
+                allowed_tools=allowed_tools,
+            )
             if tool_calls and tool_executor is not None:
                 if tracer is not None:
                     tracer.write(
@@ -432,7 +440,12 @@ def run_pipeline(
                     ]
                     tool_prompt = tool_user_content
                 response = _complete(tool_prompt, messages=tool_messages)
-                final_response, ignored_calls = extract_tool_calls(response)
+                final_response, ignored_calls = extract_tool_calls(
+                    response,
+                    tracer=tracer,
+                    role=role.name,
+                    allowed_tools=allowed_tools,
+                )
                 if ignored_calls and tracer is not None:
                     tracer.write(
                         TraceEvent(
@@ -450,7 +463,12 @@ def run_pipeline(
             else:
                 final_response = visible_text
 
-        tool_stripped, _ignored_calls = extract_tool_calls(final_response)
+        tool_stripped, _ignored_calls = extract_tool_calls(
+            final_response,
+            tracer=tracer,
+            role=role.name,
+            allowed_tools=allowed_tools,
+        )
         notes_stripped, patch = extract_notes(tool_stripped)
         if patch is not None and role.name != "governor":
             if tracer is not None:

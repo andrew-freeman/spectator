@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 
 from spectator.runtime.notes import END_MARKER as NOTES_END
@@ -161,9 +162,32 @@ def _strip_retrieval_blocks(text: str) -> tuple[str, bool]:
     return text, False
 
 
+def _strip_bare_tool_json(text: str) -> tuple[str, bool]:
+    stripped = text.strip()
+    if not stripped or not (stripped.startswith("{") and stripped.endswith("}")):
+        return text, False
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        return text, False
+    if not isinstance(payload, dict):
+        return text, False
+    tool_name = None
+    if "name" in payload and "arguments" in payload:
+        tool_name = payload.get("name")
+    elif "tool" in payload and "args" in payload:
+        tool_name = payload.get("tool")
+    if isinstance(tool_name, str) and tool_name.startswith(("fs.", "shell.", "http.")):
+        return "", True
+    return text, False
+
+
 def sanitize_visible_text_with_report(text: str) -> tuple[str, list[str], bool]:
     if not text:
         return text, [], False
+    stripped_tool_json, tool_json_removed = _strip_bare_tool_json(text)
+    if tool_json_removed:
+        return "...", ["BARE_TOOL_JSON"], True
 
     placeholders: dict[str, str] = {}
     segments: list[str] = []

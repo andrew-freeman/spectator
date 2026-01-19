@@ -32,6 +32,11 @@ def test_sanitize_strips_tool_calls_block() -> None:
     assert sanitize_visible_text(text) == "Intro\n\nOutro"
 
 
+def test_sanitize_strips_bare_tool_call_json() -> None:
+    text = '{"name":"fs.list_dir","arguments":"{\\"path\\":\\"/sandbox\\"}"}'
+    assert sanitize_visible_text(text) == "..."
+
+
 def test_sanitize_strips_state_only_output() -> None:
     text = "STATE:\n{...}"
     assert sanitize_visible_text(text) == "..."

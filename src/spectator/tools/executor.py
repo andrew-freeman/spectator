@@ -83,3 +83,6 @@ class ToolExecutor:
                 )
             )
         return results
+
+    def list_tools(self) -> list[str]:
+        return [spec.name for spec in self._registry.list_tools()]

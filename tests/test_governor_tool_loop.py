@@ -81,3 +81,32 @@ def test_governor_tool_loop_strips_reasoning_but_keeps_tool_calls(tmp_path) -> N
     assert len(backend.calls) == 2
     assert "TOOL_RESULTS:" in backend.calls[1]["prompt"]
     assert final_text == "Final answer."
+
+
+def test_governor_tool_loop_executes_bare_tool_json(tmp_path) -> None:
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    (sandbox / "hello.txt").write_text("hello", encoding="utf-8")
+    _registry, executor = build_default_registry(sandbox)
+
+    response_1 = "{\"name\":\"fs.list_dir\",\"arguments\":\"{\\\"path\\\":\\\".\\\"}\"}"
+    response_2 = "done"
+
+    backend = FakeBackend()
+    backend.extend_role_responses("governor", [response_1, response_2])
+    roles = [RoleSpec(name="governor", system_prompt="Decide.")]
+
+    checkpoint = Checkpoint(session_id="s-3", revision=0, updated_ts=0.0, state=State())
+
+    final_text, _results, _checkpoint = run_pipeline(
+        checkpoint,
+        "hello",
+        roles,
+        backend,
+        tool_executor=executor,
+    )
+
+    assert len(backend.calls) == 2
+    assert "TOOL_RESULTS:" in backend.calls[1]["prompt"]
+    assert final_text == "done"
+    assert final_text != response_1
