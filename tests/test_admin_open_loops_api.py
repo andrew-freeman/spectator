@@ -66,3 +66,30 @@ def test_admin_open_loops_crud(tmp_path: Path) -> None:
     checkpoint = checkpoints.load_latest(session_id, base_dir=checkpoint_dir)
     assert checkpoint is not None
     assert checkpoint.state.open_loops == []
+
+
+def test_admin_open_loops_run_endpoint(tmp_path: Path) -> None:
+    data_root = tmp_path / "data"
+    checkpoint_dir = data_root / "checkpoints"
+    checkpoint_dir.mkdir(parents=True)
+
+    session_id = "session-2"
+    _write_checkpoint(checkpoint_dir / f"{session_id}.json", session_id)
+
+    client = TestClient(create_app(data_root=data_root))
+
+    create_resp = client.post(
+        f"/api/sessions/{session_id}/open_loops",
+        json={"title": "Say ping"},
+    )
+    loop_id = create_resp.json()["open_loops"][0]["id"]
+
+    run_resp = client.post(
+        f"/api/sessions/{session_id}/open_loops/run",
+        json={"backend": "fake"},
+    )
+    assert run_resp.status_code == 200
+    payload = run_resp.json()
+    assert payload["run_id"]
+    open_loops = payload["open_loops"]
+    assert any(loop.get("id") == loop_id for loop in open_loops)

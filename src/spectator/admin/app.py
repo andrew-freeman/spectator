@@ -33,6 +33,10 @@ class OpenLoopRequest(BaseModel):
     priority: int | None = None
 
 
+class RunOpenLoopsRequest(BaseModel):
+    backend: str | None = None
+
+
 def _resolve_data_root(data_root: Path | None) -> Path:
     if data_root is not None:
         return data_root
@@ -191,5 +195,55 @@ def create_app(data_root: Path | None = None) -> FastAPI:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"session_id": session_id, "open_loops": loops}
+
+    @app.post("/api/sessions/{session_id}/open_loops/run")
+    async def run_open_loops(
+        session_id: str, payload: RunOpenLoopsRequest
+    ) -> dict[str, Any]:
+        try:
+            loops = list_open_loops(session_id, root)
+        except ValueError as exc:
+            if str(exc) == "session not found":
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not loops:
+            raise HTTPException(status_code=400, detail="no open loops to run")
+
+        lines = [
+            "Please resolve the following open loops. For each item, do the work and then close it",
+            "using NOTES_JSON close_open_loops with the loop id.",
+            "",
+        ]
+        for loop in loops:
+            loop_id = loop.get("id") or "unknown"
+            title = loop.get("title") or loop.get("raw") or "untitled"
+            lines.append(f"- [{loop_id}] {title}")
+        prompt = "\n".join(lines)
+
+        final_text = controller.run_turn(
+            session_id,
+            prompt,
+            base_dir=root,
+            backend_name=payload.backend,
+        )
+        checkpoint = checkpoints.load_latest(session_id, base_dir=root / "checkpoints")
+        run_id = None
+        trace_file_name = None
+        if checkpoint is not None and checkpoint.trace_tail:
+            trace_file_name = checkpoint.trace_tail[-1]
+            run_id = _extract_run_id(session_id, trace_file_name)
+        if run_id is None and checkpoint is not None:
+            run_id = f"rev-{checkpoint.revision}"
+        if trace_file_name is None and run_id is not None:
+            trace_file_name = f"{session_id}__{run_id}.jsonl"
+
+        updated_loops = list_open_loops(session_id, root)
+        return {
+            "session_id": session_id,
+            "run_id": run_id,
+            "trace_file_name": trace_file_name,
+            "final_text": final_text,
+            "open_loops": updated_loops,
+        }
 
     return app

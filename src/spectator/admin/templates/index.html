@@ -26,6 +26,7 @@
       <main class="content">
         <nav class="tabs" role="tablist" aria-label="Admin tabs">
           <button class="tab tab--active" role="tab" aria-selected="true" aria-controls="tab-inspect" id="tab-button-inspect" type="button">Inspect</button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="tab-loops" id="tab-button-loops" type="button">Loops</button>
           <button class="tab" role="tab" aria-selected="false" aria-controls="tab-chat" id="tab-button-chat" type="button">Chat</button>
         </nav>
         <div id="tab-inspect" class="tab-panel tab-panel--active" role="tabpanel" aria-labelledby="tab-button-inspect">
@@ -108,6 +109,27 @@
           <h2>Sanitize warnings</h2>
           <div id="sanitize-warnings" class="list"></div>
         </section>
+        </div>
+        <div id="tab-loops" class="tab-panel" role="tabpanel" aria-labelledby="tab-button-loops">
+          <section class="panel">
+            <div class="panel__header">
+              <h2>Open loop stats</h2>
+              <div class="panel__meta" id="loop-status">No session selected</div>
+            </div>
+            <div id="loop-stats" class="stats"></div>
+            <div class="controls">
+              <label class="field">
+                <span>Backend</span>
+                <input id="loop-backend" type="text" placeholder="llama" />
+              </label>
+              <button id="run-open-loops" class="button button--accent" type="button">Run open loops</button>
+            </div>
+            <div class="panel__meta" id="loop-run-result"></div>
+          </section>
+          <section class="panel">
+            <h2>Open loop list</h2>
+            <div id="open-loops-summary" class="list"></div>
+          </section>
         </div>
         <div id="tab-chat" class="tab-panel" role="tabpanel" aria-labelledby="tab-button-chat">
           <section class="panel">

@@ -20,8 +20,10 @@ const openLoopDetails = document.getElementById("open-loop-details");
 const openLoopTags = document.getElementById("open-loop-tags");
 const openLoopPriority = document.getElementById("open-loop-priority");
 const tabInspectBtn = document.getElementById("tab-button-inspect");
+const tabLoopsBtn = document.getElementById("tab-button-loops");
 const tabChatBtn = document.getElementById("tab-button-chat");
 const tabInspectPanel = document.getElementById("tab-inspect");
+const tabLoopsPanel = document.getElementById("tab-loops");
 const tabChatPanel = document.getElementById("tab-chat");
 const chatStatusEl = document.getElementById("chat-status");
 const chatLogEl = document.getElementById("chat-log");
@@ -30,13 +32,21 @@ const chatSessionInput = document.getElementById("chat-session");
 const chatBackendInput = document.getElementById("chat-backend");
 const chatMessageInput = document.getElementById("chat-message");
 const chatClearBtn = document.getElementById("chat-clear");
+const loopStatusEl = document.getElementById("loop-status");
+const loopStatsEl = document.getElementById("loop-stats");
+const loopBackendInput = document.getElementById("loop-backend");
+const runOpenLoopsBtn = document.getElementById("run-open-loops");
+const loopRunResultEl = document.getElementById("loop-run-result");
+const openLoopsSummaryEl = document.getElementById("open-loops-summary");
 
 let currentSession = null;
 let currentRun = null;
 let currentEvents = [];
 let chatMessages = [];
+let currentOpenLoops = [];
 let sessionInputTouched = false;
 let backendInputTouched = false;
+let loopBackendTouched = false;
 
 function clearElement(el) {
   while (el.firstChild) {
@@ -337,6 +347,12 @@ function renderSanitizeWarnings(warnings) {
 
 function renderOpenLoops(openLoops) {
   clearElement(openLoopsEl);
+  if (openLoopsSummaryEl) {
+    clearElement(openLoopsSummaryEl);
+  }
+  currentOpenLoops = Array.isArray(openLoops) ? openLoops : [];
+  renderLoopStats(currentOpenLoops);
+  renderOpenLoopsSummary(currentOpenLoops);
   if (!Array.isArray(openLoops) || openLoops.length === 0) {
     const empty = document.createElement("div");
     empty.className = "list__row list__row--muted";
@@ -380,6 +396,110 @@ function renderOpenLoops(openLoops) {
     }
     openLoopsEl.appendChild(row);
   });
+}
+
+function renderOpenLoopsSummary(openLoops) {
+  if (!openLoopsSummaryEl) {
+    return;
+  }
+  clearElement(openLoopsSummaryEl);
+  if (!Array.isArray(openLoops) || openLoops.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "list__row list__row--muted";
+    empty.textContent = "No open loops.";
+    openLoopsSummaryEl.appendChild(empty);
+    return;
+  }
+  openLoops.forEach((loop) => {
+    const row = document.createElement("div");
+    row.className = "list__row list__row--card";
+    const title = document.createElement("div");
+    title.className = "loop__title";
+    title.textContent = loop.title || loop.raw || "Untitled loop";
+    row.appendChild(title);
+    const meta = document.createElement("div");
+    meta.className = "loop__meta";
+    const chips = [];
+    if (loop.id) {
+      chips.push(`id:${loop.id}`);
+    }
+    if (typeof loop.priority === "number") {
+      chips.push(`priority:${loop.priority}`);
+    }
+    if (Array.isArray(loop.tags) && loop.tags.length) {
+      chips.push(`tags:${loop.tags.join(", ")}`);
+    }
+    meta.textContent = chips.join(" • ");
+    row.appendChild(meta);
+    openLoopsSummaryEl.appendChild(row);
+  });
+}
+
+function renderLoopStats(openLoops) {
+  if (!loopStatsEl || !loopStatusEl) {
+    return;
+  }
+  clearElement(loopStatsEl);
+  if (!currentSession) {
+    loopStatusEl.textContent = "No session selected";
+  } else {
+    loopStatusEl.textContent = `Session: ${currentSession}`;
+  }
+  if (!Array.isArray(openLoops) || openLoops.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "list__row list__row--muted";
+    empty.textContent = "No open loops available.";
+    loopStatsEl.appendChild(empty);
+    return;
+  }
+  const total = openLoops.length;
+  const priorities = { high: 0, medium: 0, low: 0, none: 0 };
+  const tags = {};
+  openLoops.forEach((loop) => {
+    const priority = loop.priority;
+    if (typeof priority !== "number") {
+      priorities.none += 1;
+    } else if (priority >= 7) {
+      priorities.high += 1;
+    } else if (priority >= 3) {
+      priorities.medium += 1;
+    } else {
+      priorities.low += 1;
+    }
+    if (Array.isArray(loop.tags)) {
+      loop.tags.forEach((tag) => {
+        tags[tag] = (tags[tag] || 0) + 1;
+      });
+    }
+  });
+  const stats = [
+    { label: "Total open loops", value: total },
+    { label: "High priority (7-10)", value: priorities.high },
+    { label: "Medium priority (3-6)", value: priorities.medium },
+    { label: "Low priority (0-2)", value: priorities.low },
+    { label: "No priority", value: priorities.none },
+  ];
+  stats.forEach((entry) => {
+    const row = document.createElement("div");
+    row.className = "stats__row";
+    row.textContent = `${entry.label}: ${entry.value}`;
+    loopStatsEl.appendChild(row);
+  });
+  const tagEntries = Object.entries(tags)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6);
+  if (tagEntries.length) {
+    const tagHeader = document.createElement("div");
+    tagHeader.className = "stats__row stats__row--title";
+    tagHeader.textContent = "Top tags";
+    loopStatsEl.appendChild(tagHeader);
+    tagEntries.forEach(([tag, count]) => {
+      const row = document.createElement("div");
+      row.className = "stats__row";
+      row.textContent = `${tag}: ${count}`;
+      loopStatsEl.appendChild(row);
+    });
+  }
 }
 
 function renderTimelineKindOptions(events) {
@@ -442,16 +562,24 @@ function ensureChatDefaults(sessions) {
   if (chatSessionInput && !sessionInputTouched && !chatSessionInput.value.trim()) {
     chatSessionInput.value = getNextSessionId(sessions);
   }
+  if (loopBackendInput && !loopBackendTouched && !loopBackendInput.value.trim()) {
+    loopBackendInput.value = chatBackendInput?.value.trim() || "llama";
+  }
 }
 
 function setActiveTab(tab) {
   const isInspect = tab === "inspect";
+  const isLoops = tab === "loops";
+  const isChat = tab === "chat";
   tabInspectBtn.classList.toggle("tab--active", isInspect);
-  tabChatBtn.classList.toggle("tab--active", !isInspect);
+  tabLoopsBtn.classList.toggle("tab--active", isLoops);
+  tabChatBtn.classList.toggle("tab--active", isChat);
   tabInspectBtn.setAttribute("aria-selected", String(isInspect));
-  tabChatBtn.setAttribute("aria-selected", String(!isInspect));
+  tabLoopsBtn.setAttribute("aria-selected", String(isLoops));
+  tabChatBtn.setAttribute("aria-selected", String(isChat));
   tabInspectPanel.classList.toggle("tab-panel--active", isInspect);
-  tabChatPanel.classList.toggle("tab-panel--active", !isInspect);
+  tabLoopsPanel.classList.toggle("tab-panel--active", isLoops);
+  tabChatPanel.classList.toggle("tab-panel--active", isChat);
 }
 
 function updateChatStatus(text) {
@@ -591,6 +719,38 @@ async function closeOpenLoop(loopId) {
   }
   const data = await response.json();
   renderOpenLoops(data.open_loops || []);
+}
+
+async function runOpenLoops() {
+  if (!currentSession) {
+    return;
+  }
+  if (loopRunResultEl) {
+    loopRunResultEl.textContent = "Running open loops...";
+  }
+  const backend = loopBackendInput?.value.trim();
+  const payload = backend ? { backend } : {};
+  const response = await fetch(`/api/sessions/${currentSession}/open_loops/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    if (loopRunResultEl) {
+      loopRunResultEl.textContent = "Failed to run open loops.";
+    }
+    return;
+  }
+  const data = await response.json();
+  if (loopRunResultEl) {
+    loopRunResultEl.textContent = `Run: ${data.run_id || "unknown"}`;
+  }
+  renderOpenLoops(data.open_loops || []);
+  if (data.run_id) {
+    currentRun = data.run_id;
+    await loadRuns(currentSession);
+    await loadRun(currentSession, data.run_id);
+  }
 }
 
 async function loadRun(sessionId, runId) {
@@ -773,8 +933,9 @@ if (openLoopForm) {
   });
 }
 
-if (tabInspectBtn && tabChatBtn) {
+if (tabInspectBtn && tabChatBtn && tabLoopsBtn) {
   tabInspectBtn.addEventListener("click", () => setActiveTab("inspect"));
+  tabLoopsBtn.addEventListener("click", () => setActiveTab("loops"));
   tabChatBtn.addEventListener("click", () => setActiveTab("chat"));
 }
 
@@ -797,11 +958,23 @@ if (chatBackendInput) {
   });
 }
 
+if (loopBackendInput) {
+  loopBackendInput.addEventListener("input", () => {
+    loopBackendTouched = true;
+  });
+}
+
 if (chatClearBtn) {
   chatClearBtn.addEventListener("click", () => {
     chatMessages = [];
     renderChatLog();
     updateChatStatus("Cleared.");
+  });
+}
+
+if (runOpenLoopsBtn) {
+  runOpenLoopsBtn.addEventListener("click", () => {
+    runOpenLoops();
   });
 }
 

@@ -340,6 +340,24 @@ body {
   color: #d7dbe3;
 }
 
+.stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.5rem 0 1rem;
+}
+
+.stats__row {
+  font-size: 0.9rem;
+  color: #d7dbe3;
+}
+
+.stats__row--title {
+  margin-top: 0.5rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .chat {
   display: flex;
   flex-direction: column;
