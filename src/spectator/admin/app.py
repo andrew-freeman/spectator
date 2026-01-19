@@ -12,6 +12,11 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from spectator.admin.trace_parser import parse_trace_file
+from spectator.runtime.open_loops_admin import (
+    add_open_loop,
+    close_open_loop,
+    list_open_loops,
+)
 from spectator.runtime import checkpoints, controller
 
 
@@ -19,6 +24,13 @@ class RunTurnRequest(BaseModel):
     session_id: str
     text: str
     backend: str | None = None
+
+
+class OpenLoopRequest(BaseModel):
+    title: str
+    details: str | None = None
+    tags: list[str] | None = None
+    priority: int | None = None
 
 
 def _resolve_data_root(data_root: Path | None) -> Path:
@@ -144,5 +156,40 @@ def create_app(data_root: Path | None = None) -> FastAPI:
             "trace_file_name": trace_file_name,
             "inspect_url": f"/?session={payload.session_id}&run={run_id}",
         }
+
+    @app.get("/api/sessions/{session_id}/open_loops")
+    async def get_open_loops(session_id: str) -> dict[str, Any]:
+        try:
+            loops = list_open_loops(session_id, root)
+        except ValueError as exc:
+            if str(exc) == "session not found":
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"session_id": session_id, "open_loops": loops}
+
+    @app.post("/api/sessions/{session_id}/open_loops")
+    async def create_open_loop(session_id: str, payload: OpenLoopRequest) -> dict[str, Any]:
+        try:
+            loops = add_open_loop(
+                session_id,
+                payload.title,
+                payload.details,
+                payload.tags,
+                payload.priority,
+                root,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"session_id": session_id, "open_loops": loops}
+
+    @app.post("/api/sessions/{session_id}/open_loops/{loop_id}/close")
+    async def close_loop(session_id: str, loop_id: str) -> dict[str, Any]:
+        try:
+            loops = close_open_loop(session_id, loop_id, root)
+        except ValueError as exc:
+            if str(exc) == "session not found":
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"session_id": session_id, "open_loops": loops}
 
     return app

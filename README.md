@@ -176,6 +176,12 @@ To run the admin tests locally:
 pip install -e ".[admin]" && pytest -m admin
 ```
 
+Open loops endpoints (task tracking):
+
+* `GET /api/sessions/{session_id}/open_loops`
+* `POST /api/sessions/{session_id}/open_loops`
+* `POST /api/sessions/{session_id}/open_loops/{loop_id}/close`
+
 ---
 
 ## Design philosophy

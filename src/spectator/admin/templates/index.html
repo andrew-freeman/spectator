@@ -10,6 +10,9 @@
     <header class="header">
       <h1>Spectator Admin</h1>
       <div class="header__hint">JSONL trace inspector</div>
+      <div class="header__actions">
+        <button id="refresh-all" class="button button--ghost" type="button">Refresh all</button>
+      </div>
     </header>
     <div class="layout">
       <aside class="sidebar">
@@ -21,9 +24,61 @@
         <div id="runs" class="list"></div>
       </aside>
       <main class="content">
+        <nav class="tabs" role="tablist" aria-label="Admin tabs">
+          <button class="tab tab--active" role="tab" aria-selected="true" aria-controls="tab-inspect" id="tab-button-inspect" type="button">Inspect</button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="tab-chat" id="tab-button-chat" type="button">Chat</button>
+        </nav>
+        <div id="tab-inspect" class="tab-panel tab-panel--active" role="tabpanel" aria-labelledby="tab-button-inspect">
+        <section class="panel">
+          <div class="panel__header">
+            <h2>Controls</h2>
+            <div class="panel__meta" id="selection-status">No session selected</div>
+          </div>
+          <div class="controls">
+            <button id="refresh-sessions" class="button" type="button">Refresh sessions</button>
+            <button id="refresh-runs" class="button" type="button">Refresh runs</button>
+            <button id="load-latest-run" class="button" type="button">Load latest run</button>
+            <button id="copy-final" class="button" type="button">Copy final response</button>
+          </div>
+          <div class="controls__filters">
+            <label class="field">
+              <span>Timeline filter</span>
+              <input id="timeline-filter" type="search" placeholder="kind, role, text..." />
+            </label>
+            <label class="field">
+              <span>Timeline kind</span>
+              <select id="timeline-kind">
+                <option value="">All</option>
+              </select>
+            </label>
+          </div>
+        </section>
         <section class="panel">
           <h2>Final response</h2>
           <pre id="final-response" class="code"></pre>
+        </section>
+        <section class="panel">
+          <h2>Open loops</h2>
+          <div id="open-loops" class="list"></div>
+          <form id="open-loop-form" class="form">
+            <label class="field">
+              <span>Title</span>
+              <input id="open-loop-title" type="text" required />
+            </label>
+            <label class="field">
+              <span>Details</span>
+              <textarea id="open-loop-details" rows="3"></textarea>
+            </label>
+            <label class="field">
+              <span>Tags (comma separated)</span>
+              <input id="open-loop-tags" type="text" />
+            </label>
+            <label class="field">
+              <span>Priority (0-10)</span>
+              <input id="open-loop-priority" type="number" min="0" max="10" />
+            </label>
+            <button class="button button--accent" type="submit">Add open loop</button>
+          </form>
         </section>
         <section class="panel">
           <h2>Timeline</h2>
@@ -53,6 +108,36 @@
           <h2>Sanitize warnings</h2>
           <div id="sanitize-warnings" class="list"></div>
         </section>
+        </div>
+        <div id="tab-chat" class="tab-panel" role="tabpanel" aria-labelledby="tab-button-chat">
+          <section class="panel">
+            <div class="panel__header">
+              <h2>Chat</h2>
+              <div class="panel__meta" id="chat-status">Idle</div>
+            </div>
+            <div class="chat">
+              <div id="chat-log" class="chat__log" aria-live="polite"></div>
+              <form id="chat-form" class="chat__form">
+                <label class="field">
+                  <span>Session</span>
+                  <input id="chat-session" type="text" placeholder="session-id" />
+                </label>
+                <label class="field">
+                  <span>Backend (optional)</span>
+                  <input id="chat-backend" type="text" placeholder="fake" />
+                </label>
+                <label class="field chat__input">
+                  <span>Message</span>
+                  <textarea id="chat-message" rows="4" required></textarea>
+                </label>
+                <div class="chat__actions">
+                  <button class="button button--accent" type="submit">Send</button>
+                  <button id="chat-clear" class="button button--ghost" type="button">Clear</button>
+                </div>
+              </form>
+            </div>
+          </section>
+        </div>
       </main>
     </div>
     <script src="/static/app.js"></script>
