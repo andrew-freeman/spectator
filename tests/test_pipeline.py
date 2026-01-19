@@ -27,9 +27,48 @@ def test_pipeline_injects_upstream_content() -> None:
     assert "reflection: reflection output" in backend.calls[1]["prompt"]
 
 
-def test_pipeline_applies_notes_patch_and_strips_notes() -> None:
+def test_pipeline_applies_notes_patch_and_strips_notes_for_governor() -> None:
     checkpoint = Checkpoint(
         session_id="s-2",
+        revision=0,
+        updated_ts=0.0,
+        state=State(open_loops=["loop-1"]),
+    )
+    backend = FakeBackend()
+    backend.extend_role_responses(
+        "reflection",
+        ["Draft."],
+    )
+    backend.extend_role_responses(
+        "governor",
+        [
+            "Final.\n"
+            "<<<NOTES_JSON>>>\n"
+            "{\"set_goals\":[\"ship\"],\"add_open_loops\":[\"loop-2\"],"
+            "\"close_open_loops\":[\"loop-1\"],\"add_constraints\":[\"constraint\"],"
+            "\"set_episode_summary\":\"summary\"}\n"
+            "<<<END_NOTES_JSON>>>\n"
+        ],
+    )
+
+    roles = [
+        RoleSpec(name="reflection", system_prompt="Reflect."),
+        RoleSpec(name="governor", system_prompt="Decide."),
+    ]
+
+    final_text, results, updated = run_pipeline(checkpoint, "hello", roles, backend)
+
+    assert "NOTES_JSON" not in results[1].text
+    assert updated.state.goals == ["ship"]
+    assert updated.state.open_loops == ["loop-2"]
+    assert updated.state.constraints == ["constraint"]
+    assert updated.state.episode_summary == "summary"
+    assert final_text.strip() == "Final."
+
+
+def test_pipeline_ignores_notes_from_non_governor(tmp_path) -> None:
+    checkpoint = Checkpoint(
+        session_id="s-2b",
         revision=0,
         updated_ts=0.0,
         state=State(open_loops=["loop-1"]),
@@ -52,15 +91,22 @@ def test_pipeline_applies_notes_patch_and_strips_notes() -> None:
         RoleSpec(name="reflection", system_prompt="Reflect."),
         RoleSpec(name="governor", system_prompt="Decide."),
     ]
+    tracer = TraceWriter("session-2b", base_dir=tmp_path / "traces")
 
-    final_text, results, updated = run_pipeline(checkpoint, "hello", roles, backend)
+    final_text, results, updated = run_pipeline(
+        checkpoint, "hello", roles, backend, tracer=tracer
+    )
 
     assert "NOTES_JSON" not in results[0].text
-    assert updated.state.goals == ["ship"]
-    assert updated.state.open_loops == ["loop-2"]
-    assert updated.state.constraints == ["constraint"]
-    assert updated.state.episode_summary == "summary"
+    assert updated.state.goals == []
+    assert updated.state.open_loops == ["loop-1"]
+    assert updated.state.constraints == []
+    assert updated.state.episode_summary == ""
     assert final_text == "final answer"
+
+    trace_lines = tracer.path.read_text(encoding="utf-8").strip().splitlines()
+    kinds = [json.loads(line)["kind"] for line in trace_lines]
+    assert "notes_ignored" in kinds
 
 
 def test_pipeline_injects_telemetry_for_enabled_roles() -> None:
@@ -114,16 +160,15 @@ def test_pipeline_injects_memory_feedback_for_enabled_roles() -> None:
     assert "=== MEMORY FEEDBACK ===" not in backend.calls[1]["prompt"]
 
 
-def test_pipeline_memory_feedback_marks_condensed_state() -> None:
+def test_pipeline_memory_feedback_defaults_without_notes() -> None:
     checkpoint = Checkpoint(session_id="s-6", revision=0, updated_ts=0.0, state=State())
     backend = FakeBackend()
-    goals = ",".join([f"\"goal-{idx}\"" for idx in range(40)])
     backend.extend_role_responses(
         "reflection",
         [
             "Draft.\n"
             "<<<NOTES_JSON>>>\n"
-            f"{{\"set_goals\":[{goals}]}}\n"
+            "{\"set_goals\":[\"goal-1\",\"goal-2\"]}\n"
             "<<<END_NOTES_JSON>>>\n"
         ],
     )
@@ -137,7 +182,7 @@ def test_pipeline_memory_feedback_marks_condensed_state() -> None:
     run_pipeline(checkpoint, "hello", roles, backend)
 
     assert "=== MEMORY FEEDBACK ===" in backend.calls[1]["prompt"]
-    assert "condensed: true" in backend.calls[1]["prompt"]
+    assert "condensed: false" in backend.calls[1]["prompt"]
 
 
 def test_pipeline_injects_retrieval_block_for_enabled_roles(tmp_path) -> None:

@@ -19,6 +19,10 @@ from spectator.tools.executor import ToolExecutor
 from spectator.tools.results import ToolResult
 from spectator.memory.context import MemoryContext
 
+TOOL_RESULTS_MAX_CHARS = 8192
+TOOL_RESULTS_HEAD_CHARS = 6000
+TOOL_RESULTS_TAIL_CHARS = 2000
+
 
 @dataclass(slots=True)
 class RoleSpec:
@@ -68,6 +72,23 @@ def _apply_notes_patch(state: State, patch: NotesPatch) -> None:
 def _format_tool_results(results: list[ToolResult]) -> str:
     lines = [json.dumps(asdict(result), ensure_ascii=False) for result in results]
     return "TOOL_RESULTS:\n" + "\n".join(lines)
+
+
+def _truncate_tool_results_block(text: str) -> tuple[str, int]:
+    if len(text) <= TOOL_RESULTS_MAX_CHARS:
+        return text, 0
+    marker = "... <truncated {count} chars>"
+    max_available = TOOL_RESULTS_MAX_CHARS - len(marker.format(count=0))
+    if max_available <= 0:
+        truncated_count = len(text)
+        return marker.format(count=truncated_count)[:TOOL_RESULTS_MAX_CHARS], truncated_count
+    head_len = min(TOOL_RESULTS_HEAD_CHARS, max_available)
+    tail_len = min(TOOL_RESULTS_TAIL_CHARS, max(0, max_available - head_len))
+    head = text[:head_len]
+    tail = text[-tail_len:] if tail_len else ""
+    truncated_count = len(text) - (head_len + tail_len)
+    marker = marker.format(count=truncated_count)
+    return f"{head}{marker}{tail}", truncated_count
 
 
 def _format_history(
@@ -383,8 +404,24 @@ def run_pipeline(
                                 kind="tool_done",
                                 data=data,
                         )
-                    )
+                )
                 tool_results_block = _format_tool_results(tool_results)
+                truncated_block, truncated_chars = _truncate_tool_results_block(tool_results_block)
+                if truncated_chars and tracer is not None:
+                    tracer.write(
+                        TraceEvent(
+                            ts=time.time(),
+                            kind="tool_result_truncated",
+                            data={
+                                "role": role.name,
+                                "tools": [result.tool for result in tool_results],
+                                "original_len": len(tool_results_block),
+                                "new_len": len(truncated_block),
+                                "truncated_chars": truncated_chars,
+                            },
+                        )
+                    )
+                tool_results_block = truncated_block
                 tool_prompt = f"{prompt}\n\n{tool_results_block}"
                 tool_messages = None
                 if use_messages:
@@ -415,6 +452,16 @@ def run_pipeline(
 
         tool_stripped, _ignored_calls = extract_tool_calls(final_response)
         notes_stripped, patch = extract_notes(tool_stripped)
+        if patch is not None and role.name != "governor":
+            if tracer is not None:
+                tracer.write(
+                    TraceEvent(
+                        ts=time.time(),
+                        kind="notes_ignored",
+                        data={"role": role.name},
+                    )
+                )
+            patch = None
         sanitized_text, removed, sanitized_empty = sanitize_visible_text_with_report(notes_stripped)
         if sanitized_text != notes_stripped and tracer is not None:
             tracer.write(

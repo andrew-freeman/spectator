@@ -1,5 +1,8 @@
+import json
 import time
 from pathlib import Path
+
+import pytest
 
 from spectator.core.types import ChatMessage, Checkpoint, State
 from spectator.runtime import checkpoints
@@ -57,3 +60,29 @@ def test_checkpoint_roundtrip(tmp_path: Path) -> None:
 
     assert loaded is not None
     assert loaded == checkpoint
+
+
+def test_load_latest_rejects_invalid_state_types(tmp_path: Path) -> None:
+    path = tmp_path / "session-bad.json"
+    payload = {
+        "session_id": "session-bad",
+        "revision": 1,
+        "updated_ts": time.time(),
+        "state": {
+            "goals": "not-a-list",
+            "open_loops": [],
+            "decisions": [],
+            "constraints": [],
+            "episode_summary": 123,
+            "memory_tags": [],
+            "memory_refs": [],
+            "capabilities_granted": [],
+            "capabilities_pending": [],
+        },
+        "recent_messages": [],
+        "trace_tail": [],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="checkpoint state field"):
+        checkpoints.load_latest("session-bad", base_dir=tmp_path)

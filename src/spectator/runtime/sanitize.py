@@ -42,6 +42,13 @@ _SCAFFOLD_HEADERS = {
 }
 _RETRIEVED_START = "=== RETRIEVED_MEMORY ==="
 _RETRIEVED_END = "=== END_RETRIEVED_MEMORY ==="
+_RETRIEVAL_START = "=== RETRIEVAL ==="
+_RETRIEVAL_END = "=== END RETRIEVAL ==="
+_RETRIEVAL_BLOCK_PATTERN = re.compile(
+    f"{re.escape(_RETRIEVED_START)}.*?{re.escape(_RETRIEVED_END)}"
+    f"|{re.escape(_RETRIEVAL_START)}.*?{re.escape(_RETRIEVAL_END)}",
+    re.DOTALL,
+)
 
 
 def _strip_reasoning_wrappers(text: str) -> str:
@@ -58,9 +65,13 @@ def _strip_leading_scaffolding(text: str) -> tuple[str, list[str]]:
         stripped = working.lstrip()
         if not stripped:
             return "", removed
-        if stripped.startswith(_RETRIEVED_START):
-            end_index = stripped.find(_RETRIEVED_END)
-            cut_index = end_index + len(_RETRIEVED_END) if end_index != -1 else len(stripped)
+        if stripped.startswith((_RETRIEVED_START, _RETRIEVAL_START)):
+            if stripped.startswith(_RETRIEVAL_START):
+                end_marker = _RETRIEVAL_END
+            else:
+                end_marker = _RETRIEVED_END
+            end_index = stripped.find(end_marker)
+            cut_index = end_index + len(end_marker) if end_index != -1 else len(stripped)
             working = stripped[cut_index:]
             if "RETRIEVED_MEMORY" not in removed:
                 removed.append("RETRIEVED_MEMORY")
@@ -85,8 +96,14 @@ def _strip_trailing_scaffolding(text: str) -> tuple[str, list[str]]:
         stripped = working.rstrip()
         if not stripped:
             return "", removed
-        if stripped.endswith(_RETRIEVED_END):
-            start_index = stripped.rfind(_RETRIEVED_START)
+        if stripped.endswith((_RETRIEVED_END, _RETRIEVAL_END)):
+            if stripped.endswith(_RETRIEVAL_END):
+                start_marker = _RETRIEVAL_START
+                end_marker = _RETRIEVAL_END
+            else:
+                start_marker = _RETRIEVED_START
+                end_marker = _RETRIEVED_END
+            start_index = stripped.rfind(start_marker)
             if start_index != -1:
                 working = stripped[:start_index]
                 if "RETRIEVED_MEMORY" not in removed:
@@ -138,6 +155,12 @@ def _strip_tool_notes_blocks(text: str) -> tuple[str, list[str]]:
     return sanitized, removed
 
 
+def _strip_retrieval_blocks(text: str) -> tuple[str, bool]:
+    if _RETRIEVAL_BLOCK_PATTERN.search(text):
+        return _RETRIEVAL_BLOCK_PATTERN.sub("", text), True
+    return text, False
+
+
 def sanitize_visible_text_with_report(text: str) -> tuple[str, list[str], bool]:
     if not text:
         return text, [], False
@@ -157,6 +180,7 @@ def sanitize_visible_text_with_report(text: str) -> tuple[str, list[str], bool]:
     sanitized = _strip_reasoning_wrappers(protected)
     sanitized, leading_removed = _strip_leading_scaffolding(sanitized)
     sanitized, trailing_removed = _strip_trailing_scaffolding(sanitized)
+    sanitized, retrieval_removed = _strip_retrieval_blocks(sanitized)
     sanitized, stripped_markers = _strip_dangling_markers(sanitized)
     for placeholder, original in placeholders.items():
         sanitized = sanitized.replace(placeholder, original)
@@ -165,6 +189,8 @@ def sanitize_visible_text_with_report(text: str) -> tuple[str, list[str], bool]:
     for label in (*leading_removed, *trailing_removed):
         if label not in removed:
             removed.append(label)
+    if retrieval_removed and "RETRIEVED_MEMORY" not in removed:
+        removed.append("RETRIEVED_MEMORY")
     if stripped_markers and "MARKER_POLLUTION" not in removed:
         removed.append("MARKER_POLLUTION")
     for label in block_removed:
