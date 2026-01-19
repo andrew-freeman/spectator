@@ -80,3 +80,25 @@ def test_sanitize_strips_dangling_markers() -> None:
 def test_sanitize_strips_dangling_markers_only_output() -> None:
     text = f"{TOOLS_START}\n{NOTES_END}"
     assert sanitize_visible_text(text) == "..."
+
+
+def test_sanitize_strips_retrieval_block() -> None:
+    text = (
+        "Hello\n"
+        "=== RETRIEVAL ===\n"
+        "[1] id=mem-1 text=remember\n"
+        "=== END RETRIEVAL ===\n"
+        "World"
+    )
+    assert sanitize_visible_text(text) == "Hello\n\nWorld"
+
+
+def test_sanitize_strips_retrieved_memory_block() -> None:
+    text = (
+        "Alpha\n"
+        "=== RETRIEVED_MEMORY ===\n"
+        "something\n"
+        "=== END_RETRIEVED_MEMORY ===\n"
+        "Omega"
+    )
+    assert sanitize_visible_text(text) == "Alpha\n\nOmega"
