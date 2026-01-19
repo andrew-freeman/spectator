@@ -8,6 +8,7 @@ from typing import Any
 
 from spectator.backends import get_backend, list_backends
 from spectator.backends.fake import FakeBackend
+from spectator.analysis.autopsy import autopsy_from_trace, render_autopsy_markdown
 from spectator.runtime import controller
 from spectator.runtime.tool_calls import END_MARKER, START_MARKER
 
@@ -101,6 +102,49 @@ def _smoke_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_data_root() -> Path:
+    env_root = os.getenv("DATA_ROOT")
+    if env_root:
+        return Path(env_root)
+    return Path("data")
+
+
+def _autopsy_command(args: argparse.Namespace) -> int:
+    data_root = _resolve_data_root()
+    trace_path: Path | None = None
+    checkpoint_path: Path | None = None
+    if args.trace:
+        trace_path = Path(args.trace)
+    else:
+        traces_dir = data_root / "traces"
+        if args.session and args.run:
+            trace_path = traces_dir / f"{args.session}__{args.run}.jsonl"
+            checkpoint_path = data_root / "checkpoints" / f"{args.session}.json"
+        else:
+            if args.session:
+                candidates = list(traces_dir.glob(f"{args.session}__*.jsonl"))
+            else:
+                candidates = list(traces_dir.glob("*.jsonl"))
+            if not candidates:
+                raise SystemExit("autopsy could not find any trace files")
+            trace_path = max(candidates, key=lambda path: path.stat().st_mtime)
+            name = trace_path.name
+            if "__" in name:
+                session_id = name.split("__", 1)[0]
+                checkpoint_path = data_root / "checkpoints" / f"{session_id}.json"
+
+    if args.checkpoint:
+        checkpoint_path = Path(args.checkpoint)
+
+    print(f"Autopsy trace: {trace_path}")
+    report = autopsy_from_trace(trace_path, checkpoint_path=checkpoint_path)
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        print(render_autopsy_markdown(report))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="spectator")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -123,6 +167,14 @@ def build_parser() -> argparse.ArgumentParser:
     smoke_parser = subparsers.add_parser("smoke", help="Run the smoke demo")
     smoke_parser.add_argument("--session", default="smoke-1")
     smoke_parser.set_defaults(func=_smoke_command)
+
+    autopsy_parser = subparsers.add_parser("autopsy", help="Analyze a trace JSONL file")
+    autopsy_parser.add_argument("--session")
+    autopsy_parser.add_argument("--run")
+    autopsy_parser.add_argument("--trace")
+    autopsy_parser.add_argument("--checkpoint")
+    autopsy_parser.add_argument("--json", action="store_true")
+    autopsy_parser.set_defaults(func=_autopsy_command)
 
     return parser
 

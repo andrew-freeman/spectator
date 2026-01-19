@@ -46,3 +46,13 @@ def test_fs_escape_denied(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         write_handler({"path": "../escape.txt", "text": "nope"})
+
+
+def test_fs_accepts_sandbox_alias(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "hello.txt").write_text("hello", encoding="utf-8")
+    list_handler = list_dir_handler(root)
+
+    result = list_handler({"path": "/sandbox"})
+    assert "hello.txt" in result["entries"]

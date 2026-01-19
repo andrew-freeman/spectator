@@ -7,6 +7,8 @@ from typing import Any, Iterable, List
 
 from spectator.backends.registry import register_backend
 
+_TOOL_RESULTS_MARKER = "TOOL_RESULTS:\n"
+
 
 @dataclass(slots=True)
 class FakeBackend:
@@ -20,16 +22,70 @@ class FakeBackend:
         self.calls.append(payload)
         role = payload["params"].get("role")
         if role and role in self.role_responses and self.role_responses[role]:
-            return self.role_responses[role].pop(0)
+            response = self.role_responses[role].pop(0)
+            return _render_response(response, prompt)
         if self.responses:
-            return self.responses.pop(0)
+            response = self.responses.pop(0)
+            return _render_response(response, prompt)
         return ""
 
     def extend_responses(self, responses: Iterable[str]) -> None:
         self.responses.extend(responses)
 
+    def set_responses(self, responses: Iterable[str]) -> None:
+        self.responses = list(responses)
+
     def extend_role_responses(self, role: str, responses: Iterable[str]) -> None:
         self.role_responses.setdefault(role, []).extend(responses)
+
+    def set_role_responses(self, role: str, responses: Iterable[str]) -> None:
+        self.role_responses[role] = list(responses)
+
+
+def _render_response(response: str, prompt: str) -> str:
+    if not isinstance(response, str):
+        return response
+    if "{{TOOL_OUTPUT}}" not in response:
+        return response
+    tool_output = _select_tool_output(_extract_tool_results(prompt))
+    return response.replace("{{TOOL_OUTPUT}}", tool_output)
+
+
+def _extract_tool_results(prompt: str) -> list[dict[str, Any]]:
+    start = prompt.find(_TOOL_RESULTS_MARKER)
+    if start == -1:
+        return []
+    tail = prompt[start + len(_TOOL_RESULTS_MARKER):]
+    results: list[dict[str, Any]] = []
+    for line in tail.splitlines():
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            results.append(payload)
+    return results
+
+
+def _select_tool_output(results: list[dict[str, Any]]) -> str:
+    if not results:
+        return ""
+    output = results[0].get("output")
+    if isinstance(output, dict):
+        stdout = output.get("stdout")
+        if isinstance(stdout, str):
+            return stdout.strip()
+        text = output.get("text")
+        if isinstance(text, str):
+            return text.strip()
+        entries = output.get("entries")
+        if isinstance(entries, list):
+            return ", ".join(str(entry) for entry in entries)
+    if output is None:
+        return ""
+    return json.dumps(output, ensure_ascii=True)
 
 
 def _load_env_json_list(env_value: str) -> list[str]:
