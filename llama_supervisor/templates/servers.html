@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Servers - Llama Supervisor</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="header">
+        <h1>Servers</h1>
+        <nav class="nav">
+          <a href="/">Home</a>
+          <a href="/models">Models</a>
+        </nav>
+      </header>
+
+      <section class="card">
+        <h2>Access Token</h2>
+        <div class="row">
+          <input id="token-input" type="password" placeholder="Bearer token (optional)" />
+          <button id="token-save" type="button">Save</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Running Servers</h2>
+        <table class="table" id="servers-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Status</th>
+              <th>Model</th>
+              <th>GPU</th>
+              <th>Port</th>
+              <th>PID</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <section class="card">
+        <h2>Logs</h2>
+        <div class="row">
+          <input id="log-server-id" type="text" placeholder="Server ID" />
+          <button id="log-refresh" type="button">View Logs</button>
+          <button id="log-download" type="button">Download Full Log</button>
+        </div>
+        <pre id="log-output" class="output"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Metrics</h2>
+        <div class="row">
+          <input id="metrics-server-id" type="text" placeholder="Server ID" />
+          <button id="metrics-refresh" type="button">View Metrics</button>
+        </div>
+        <pre id="metrics-output" class="output"></pre>
+      </section>
+    </main>
+
+    <script>
+      const tokenInput = document.getElementById("token-input");
+      const tokenSave = document.getElementById("token-save");
+      const serversTable = document.getElementById("servers-table").querySelector("tbody");
+      const logServerId = document.getElementById("log-server-id");
+      const logRefresh = document.getElementById("log-refresh");
+      const logOutput = document.getElementById("log-output");
+      const logDownload = document.getElementById("log-download");
+      const metricsServerId = document.getElementById("metrics-server-id");
+      const metricsRefresh = document.getElementById("metrics-refresh");
+      const metricsOutput = document.getElementById("metrics-output");
+
+      function getToken() {
+        return localStorage.getItem("llamaSupervisorToken") || "";
+      }
+
+      function setToken(value) {
+        localStorage.setItem("llamaSupervisorToken", value);
+      }
+
+      function authHeaders() {
+        const token = getToken();
+        if (!token) return {};
+        return { Authorization: `Bearer ${token}` };
+      }
+
+      tokenInput.value = getToken();
+      tokenSave.addEventListener("click", () => {
+        setToken(tokenInput.value.trim());
+      });
+
+      async function loadServers() {
+        const response = await fetch("/api/servers", { headers: authHeaders() });
+        const payload = await response.json();
+        serversTable.innerHTML = "";
+        if (!response.ok) {
+          const row = document.createElement("tr");
+          row.innerHTML = `<td colspan="7">${payload.detail || "Failed to load."}</td>`;
+          serversTable.appendChild(row);
+          return;
+        }
+        payload.servers.forEach((server) => {
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td>${server.server_id}</td>
+            <td>${server.status}</td>
+            <td>${server.model}</td>
+            <td>${server.gpu === null ? "CPU" : "GPU " + server.gpu}</td>
+            <td>${server.port}</td>
+            <td>${server.pid || "-"}</td>
+            <td>
+              <button data-action="stop" data-id="${server.server_id}">Stop</button>
+              <button data-action="logs" data-id="${server.server_id}">Logs</button>
+              <button data-action="metrics" data-id="${server.server_id}">Metrics</button>
+            </td>
+          `;
+          serversTable.appendChild(row);
+        });
+      }
+
+      serversTable.addEventListener("click", async (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        const action = target.getAttribute("data-action");
+        const id = target.getAttribute("data-id");
+        if (!action || !id) return;
+        if (action === "stop") {
+          await fetch(`/api/servers/stop/${id}`, { method: "POST", headers: authHeaders() });
+          loadServers();
+        } else if (action === "logs") {
+          logServerId.value = id;
+          viewLogs();
+        } else if (action === "metrics") {
+          metricsServerId.value = id;
+          viewMetrics();
+        }
+      });
+
+      async function viewLogs() {
+        const id = logServerId.value.trim();
+        if (!id) return;
+        const response = await fetch(`/api/servers/${id}/logs?tail=2000`, {
+          headers: authHeaders(),
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          logOutput.textContent = payload.detail || "Failed to load logs.";
+          return;
+        }
+        logOutput.textContent = payload.lines.join("\n");
+        logDownload.dataset.serverId = id;
+      }
+
+      async function viewMetrics() {
+        const id = metricsServerId.value.trim();
+        if (!id) return;
+        const response = await fetch(`/api/servers/${id}/metrics?limit=50`, {
+          headers: authHeaders(),
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          metricsOutput.textContent = payload.detail || "Failed to load metrics.";
+          return;
+        }
+        metricsOutput.textContent = JSON.stringify(payload.metrics, null, 2);
+      }
+
+      logRefresh.addEventListener("click", viewLogs);
+      logDownload.addEventListener("click", async () => {
+        const id = logDownload.dataset.serverId || logServerId.value.trim();
+        if (!id) return;
+        const response = await fetch(`/api/servers/${id}/logfile`, { headers: authHeaders() });
+        if (!response.ok) {
+          logOutput.textContent = "Failed to download log.";
+          return;
+        }
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${id}.log`;
+        link.click();
+        URL.revokeObjectURL(url);
+      });
+      metricsRefresh.addEventListener("click", viewMetrics);
+      loadServers();
+      setInterval(loadServers, 5000);
+    </script>
+  </body>
+</html>

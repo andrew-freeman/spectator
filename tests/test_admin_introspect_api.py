@@ -25,7 +25,7 @@ def test_admin_introspect_endpoints(tmp_path: Path, monkeypatch) -> None:
     (data_root / "traces").mkdir()
 
     monkeypatch.setenv("REPO_ROOT", str(repo_root))
-    responses = {"governor": ["Summary ok."]}
+    responses = {"governor": ["Chunk summary.", "Summary ok."]}
     monkeypatch.setenv("SPECTATOR_FAKE_ROLE_RESPONSES", json.dumps(responses))
 
     client = TestClient(create_app(data_root=data_root))
@@ -43,4 +43,8 @@ def test_admin_introspect_endpoints(tmp_path: Path, monkeypatch) -> None:
         json={"path": "sample.txt", "lines": 2, "backend": "fake"},
     )
     assert summarize_resp.status_code == 200
-    assert summarize_resp.json()["summary"] == "Summary ok."
+    summary = summarize_resp.json()["summary"]
+    assert "**Log Summary**" in summary
+    assert "**Non-log Tail**" in summary
+    assert "Summary ok." in summary
+    assert "Chunks:" in summary

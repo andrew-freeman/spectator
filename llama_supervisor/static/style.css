@@ -1,0 +1,101 @@
+body {
+  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+  background: #f5f6f8;
+  color: #1f2328;
+  margin: 0;
+}
+
+.container {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.nav a {
+  margin-right: 12px;
+  color: #2f5aa8;
+  text-decoration: none;
+}
+
+.card {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+label {
+  display: block;
+  margin-bottom: 12px;
+}
+
+input,
+select,
+button {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #ccd0d5;
+}
+
+button {
+  background: #2f5aa8;
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #244886;
+}
+
+.output {
+  background: #101827;
+  color: #e5e7eb;
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  max-height: 280px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.table th,
+.table td {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 8px;
+  text-align: left;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.list {
+  list-style: none;
+  padding-left: 0;
+}
+
+.link {
+  color: #2f5aa8;
+  text-decoration: none;
+}

@@ -186,7 +186,7 @@ Introspection endpoints (read-only repo access):
 
 * `GET /api/introspect/list?path=<prefix>&limit=<n>`
 * `GET /api/introspect/read?path=<file>&lines=<n>`
-* `POST /api/introspect/summarize`
+* `POST /api/introspect/summarize` (optional `chunking` + `max_chars` for structured chunking)
 
 ---
 

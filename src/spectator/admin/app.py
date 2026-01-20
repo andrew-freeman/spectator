@@ -49,6 +49,8 @@ class IntrospectSummarizeRequest(BaseModel):
     instruction: str | None = None
     lines: int | None = None
     max_tokens: int | None = None
+    chunking: str | None = None
+    max_chars: int | None = None
 
 
 def _resolve_data_root(data_root: Path | None) -> Path:
@@ -286,9 +288,15 @@ def create_app(data_root: Path | None = None) -> FastAPI:
         backend = payload.backend or "fake"
         instruction = payload.instruction
         lines = payload.lines or 200
+        chunking = payload.chunking or "auto"
+        max_chars = payload.max_chars if payload.max_chars is not None else 40000
         max_tokens = payload.max_tokens if payload.max_tokens is not None else 1024
         if not isinstance(lines, int) or lines <= 0:
             raise HTTPException(status_code=400, detail="lines must be positive")
+        if chunking not in {"auto", "headings", "python_ast", "fixed", "log"}:
+            raise HTTPException(status_code=400, detail="chunking must be a valid strategy")
+        if not isinstance(max_chars, int) or max_chars <= 0:
+            raise HTTPException(status_code=400, detail="max_chars must be positive")
         if max_tokens is not None and (not isinstance(max_tokens, int) or max_tokens <= 0):
             raise HTTPException(status_code=400, detail="max_tokens must be positive")
         result = summarize_repo_file(
@@ -299,6 +307,8 @@ def create_app(data_root: Path | None = None) -> FastAPI:
             max_lines=lines,
             max_tokens=max_tokens,
             instruction=instruction if isinstance(instruction, str) else None,
+            chunking=chunking,
+            max_chars=max_chars,
         )
         return result
 

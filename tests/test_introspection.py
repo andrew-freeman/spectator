@@ -33,7 +33,7 @@ def test_introspection_summarize_uses_fake_backend(tmp_path: Path, monkeypatch) 
     sample = repo_root / "sample.txt"
     sample.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
 
-    responses = {"governor": ["Summary here."]}
+    responses = {"governor": ["Chunk summary.", "Summary here."]}
     monkeypatch.setenv("SPECTATOR_FAKE_ROLE_RESPONSES", json.dumps(responses))
 
     result = summarize_repo_file(
@@ -45,4 +45,7 @@ def test_introspection_summarize_uses_fake_backend(tmp_path: Path, monkeypatch) 
         instruction="Summarize.",
     )
 
-    assert result["summary"] == "Summary here."
+    assert "**Log Summary**" in result["summary"]
+    assert "**Non-log Tail**" in result["summary"]
+    assert "Summary here." in result["summary"]
+    assert "Chunks:" in result["summary"]

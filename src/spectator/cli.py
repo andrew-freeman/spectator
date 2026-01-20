@@ -175,6 +175,8 @@ def _introspect_command(args: argparse.Namespace) -> int:
             max_lines=args.lines,
             max_tokens=args.max_tokens,
             instruction=args.instruction,
+            chunking=args.chunking,
+            max_chars=args.max_chars,
         )
         print(result["summary"])
         return 0
@@ -223,6 +225,12 @@ def build_parser() -> argparse.ArgumentParser:
     introspect_parser.add_argument("--backend", default="fake")
     introspect_parser.add_argument("--instruction")
     introspect_parser.add_argument("--max-tokens", type=int, default=1024)
+    introspect_parser.add_argument(
+        "--chunking",
+        choices=["auto", "headings", "python_ast", "fixed", "log"],
+        default="auto",
+    )
+    introspect_parser.add_argument("--max-chars", type=int, default=40000)
     introspect_parser.set_defaults(func=_introspect_command)
 
     return parser
