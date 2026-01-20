@@ -34,7 +34,7 @@ spectator = ["prompts/**/*.txt", "admin/templates/*.html", "admin/static/*"]
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 markers = [
   "admin: requires optional admin dependencies",
 ]

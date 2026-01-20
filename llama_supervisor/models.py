@@ -49,4 +49,3 @@ def resolve_model_path(model_root: Path, model_path: str) -> Path:
     if not resolved.is_file():
         raise ValueError("model path does not exist")
     return resolved
-

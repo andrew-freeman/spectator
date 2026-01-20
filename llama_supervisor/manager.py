@@ -56,6 +56,9 @@ class ServerManager:
             self._refresh_status_locked()
             return list(self._records.values())
 
+    def set_model_root(self, model_root: Path) -> None:
+        self.model_root = model_root.resolve()
+
     def start_server(self, payload: dict[str, Any]) -> ServerRecord:
         gpu = payload.get("gpu")
         port = payload.get("port")

@@ -6,12 +6,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from dataclasses import asdict
+
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from llama_supervisor.config import load_config
+from llama_supervisor.config import SupervisorSettings, load_config, save_settings
 from llama_supervisor.manager import ServerManager
 from llama_supervisor.models import list_models, resolve_model_path
 from llama_supervisor.telemetry import TelemetryCollector
@@ -19,8 +21,9 @@ from llama_supervisor.telemetry import TelemetryCollector
 
 def create_app() -> FastAPI:
     config = load_config()
+    model_root = config.model_root
     manager = ServerManager(
-        model_root=config.model_root,
+        model_root=model_root,
         data_root=config.data_root,
         log_max_bytes=config.log_max_bytes,
         log_backups=config.log_backups,
@@ -33,6 +36,7 @@ def create_app() -> FastAPI:
     telemetry.start()
 
     app = FastAPI()
+    app.state.model_root = model_root
     base_dir = Path(__file__).resolve().parent
     templates = Jinja2Templates(directory=str(base_dir / "templates"))
     static_dir = base_dir / "static"
@@ -60,11 +64,29 @@ def create_app() -> FastAPI:
 
     @app.get("/api/models", dependencies=[Depends(require_token)])
     async def api_models() -> dict[str, Any]:
-        items = list_models(config.model_root)
+        items = list_models(app.state.model_root)
         return {
-            "root": str(config.model_root),
-            "models": [item.__dict__ for item in items],
+            "root": str(app.state.model_root),
+            "models": [asdict(item) for item in items],
         }
+
+    @app.get("/api/config", dependencies=[Depends(require_token)])
+    async def api_config() -> dict[str, Any]:
+        return {"model_root": str(app.state.model_root)}
+
+    @app.post("/api/config", dependencies=[Depends(require_token)])
+    async def api_update_config(payload: dict[str, Any]) -> dict[str, Any]:
+        model_root = payload.get("model_root")
+        if not isinstance(model_root, str) or not model_root:
+            raise HTTPException(status_code=400, detail="model_root must be set")
+        candidate = Path(model_root).resolve()
+        if not candidate.exists() or not candidate.is_dir():
+            raise HTTPException(status_code=400, detail="model_root must be a directory")
+        settings = SupervisorSettings(model_root=candidate)
+        save_settings(config.data_root, settings)
+        app.state.model_root = candidate
+        manager.set_model_root(candidate)
+        return {"model_root": str(app.state.model_root)}
 
     @app.post("/api/servers/start", dependencies=[Depends(require_token)])
     async def api_start_server(payload: dict[str, Any]) -> dict[str, Any]:
@@ -72,7 +94,7 @@ def create_app() -> FastAPI:
             record = manager.start_server(payload)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"server": record.__dict__}
+        return {"server": asdict(record)}
 
     @app.post("/api/servers/stop/{server_id}", dependencies=[Depends(require_token)])
     async def api_stop_server(server_id: str) -> dict[str, Any]:
@@ -80,12 +102,12 @@ def create_app() -> FastAPI:
             record = manager.stop_server(server_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"server": record.__dict__}
+        return {"server": asdict(record)}
 
     @app.get("/api/servers", dependencies=[Depends(require_token)])
     async def api_servers() -> dict[str, Any]:
         records = manager.list_servers()
-        return {"servers": [record.__dict__ for record in records]}
+        return {"servers": [asdict(record) for record in records]}
 
     @app.get("/api/servers/{server_id}/logs", dependencies=[Depends(require_token)])
     async def api_logs(server_id: str, tail: int = 2000) -> dict[str, Any]:
@@ -133,7 +155,7 @@ def create_app() -> FastAPI:
         record = manager.get_record(server_id)
         if record is None:
             raise HTTPException(status_code=404, detail="unknown server id")
-        abs_path = resolve_model_path(config.model_root, record.model)
+        abs_path = resolve_model_path(app.state.model_root, record.model)
         return {"server_id": server_id, "model_path": str(abs_path)}
 
     @app.get("/api/health", dependencies=[Depends(require_token)])

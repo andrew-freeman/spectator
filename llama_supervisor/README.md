@@ -19,6 +19,8 @@ Environment variables:
 - `LOG_MAX_BYTES` (default `209715200`)
 - `LOG_BACKUPS` (default `3`)
 
+You can also update the model root from the web UI; it persists to `data/llama_supervisor.json`.
+
 ## Example start request
 
 ```bash

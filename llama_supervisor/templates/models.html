@@ -57,6 +57,15 @@
       </section>
 
       <section class="card">
+        <h2>Model Root</h2>
+        <div class="row">
+          <input id="model-root-input" type="text" placeholder="/nvme_mod/models/" />
+          <button id="model-root-save" type="button">Update</button>
+        </div>
+        <pre id="model-root-output" class="output"></pre>
+      </section>
+
+      <section class="card">
         <h2>Available Models</h2>
         <ul id="models-list" class="list"></ul>
       </section>
@@ -73,6 +82,9 @@
       const verboseInput = document.getElementById("verbose-input");
       const startForm = document.getElementById("start-form");
       const startOutput = document.getElementById("start-output");
+      const modelRootInput = document.getElementById("model-root-input");
+      const modelRootSave = document.getElementById("model-root-save");
+      const modelRootOutput = document.getElementById("model-root-output");
 
       function getToken() {
         return localStorage.getItem("llamaSupervisorToken") || "";
@@ -110,6 +122,7 @@
           return;
         }
         const payload = await response.json();
+        modelRootInput.value = payload.root;
         modelsList.innerHTML = "";
         modelSelect.innerHTML = "";
         payload.models.forEach((model) => {
@@ -122,6 +135,23 @@
           modelSelect.appendChild(option);
         });
       }
+
+      modelRootSave.addEventListener("click", async () => {
+        const root = modelRootInput.value.trim();
+        if (!root) return;
+        const response = await fetch("/api/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify({ model_root: root }),
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          modelRootOutput.textContent = payload.detail || "Failed to update model root.";
+          return;
+        }
+        modelRootOutput.textContent = `Updated: ${payload.model_root}`;
+        loadModels();
+      });
 
       startForm.addEventListener("submit", async (event) => {
         event.preventDefault();
