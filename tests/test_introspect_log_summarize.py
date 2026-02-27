@@ -13,9 +13,10 @@ def test_introspect_log_summarize_uses_tail(tmp_path: Path, monkeypatch) -> None
     data_root.mkdir()
     (data_root / "traces").mkdir()
 
-    log_path = repo_root / "summ.log"
+    log_rel_path = "tests/fixtures/summ.log"
+    log_path = repo_root / log_rel_path
     text = log_path.read_text(encoding="utf-8")
-    chunks = chunk_file("summ.log", text, strategy="log", max_chars=40000)
+    chunks = chunk_file(log_rel_path, text, strategy="log", max_chars=40000)
     log_chunks = [chunk for chunk in chunks if chunk.title.startswith("log ")]
     nonlog_chunks = [chunk for chunk in chunks if not chunk.title.startswith("log ")]
 
@@ -34,7 +35,7 @@ def test_introspect_log_summarize_uses_tail(tmp_path: Path, monkeypatch) -> None
 
     result = summarize_repo_file(
         repo_root,
-        "summ.log",
+        log_rel_path,
         data_root=data_root,
         backend_name="fake",
         chunking="log",
