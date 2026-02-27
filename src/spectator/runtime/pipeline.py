@@ -58,7 +58,22 @@ def _apply_notes_patch(state: State, patch: NotesPatch) -> None:
     if patch.add_open_loops:
         _extend_unique(state.open_loops, patch.add_open_loops)
     if patch.close_open_loops:
-        state.open_loops = [loop for loop in state.open_loops if loop not in patch.close_open_loops]
+        close_ids = set(patch.close_open_loops)
+        remaining: list[str] = []
+        for loop in state.open_loops:
+            should_close = loop in close_ids
+            if not should_close:
+                try:
+                    parsed = json.loads(loop)
+                except json.JSONDecodeError:
+                    parsed = None
+                if isinstance(parsed, dict):
+                    loop_id = parsed.get("id")
+                    if isinstance(loop_id, str) and loop_id in close_ids:
+                        should_close = True
+            if not should_close:
+                remaining.append(loop)
+        state.open_loops = remaining
     if patch.add_decisions:
         _extend_unique(state.decisions, patch.add_decisions)
     if patch.add_constraints:
